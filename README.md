@@ -75,6 +75,22 @@ If the metadata file is corrupt, a backup copy is created and a fresh file is us
 - You can also drop a sidecar preview image (`.gif`, `.jpg`, `.jpeg`, `.png`) with the same
   base name or inside `.camreview/previews/`.
 
+## AI critter detection (optional)
+
+CamReview can call OpenRouter to detect animals. This is opt-in and sends the current
+image to the OpenRouter model only when you click **Detect Animals** (images only).
+If a result already exists, CamReview reuses the cached value.
+
+You can also run **AI batch delete** to detect animals across unreviewed images and
+mark non-animal photos for delete (Apply Changes still controls the move to `Trash/`).
+
+Requirements:
+
+- Set `OPENROUTER_API_KEY` in the server environment.
+- Optional: set `OPENROUTER_MODEL` to override the default model.
+
+Results are stored as `critter` and `critterConfidence` fields in the metadata.
+
 ## Configuration
 
 See `config.example.json`. Options:
@@ -93,6 +109,9 @@ See `config.example.json`. Options:
 - `GET /api/preview-frames?path=...&generate=1` -> list or generate preview frames
 - `POST /api/transcode` -> create phone-friendly H.264 MP4
 - `GET /media?path=...` -> stream image/video
+- `POST /api/detect-critters` -> detect animal presence for the current image
+- `POST /api/detect-critters/batch-delete` -> batch detect + mark non-animal images for delete
+- `GET /api/detect-critters/batch-delete/status` -> poll batch job status
 
 ## Troubleshooting
 

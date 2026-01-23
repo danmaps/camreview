@@ -9,6 +9,7 @@ const PORT = 3000;
 
 const CONFIG_PATH = path.join(__dirname, "config.json");
 const DATA_PATH = path.join(__dirname, "trailcam_review.json");
+const OPENROUTER_ENDPOINT = "https://openrouter.ai/api/v1/chat/completions";
 
 const SUPPORTED_EXTENSIONS = new Set([".jpg", ".jpeg", ".png", ".mp4", ".mov"]);
 const PREVIEW_EXTENSIONS = [".gif", ".jpg", ".jpeg", ".png"];
@@ -23,6 +24,7 @@ let appConfig = {};
 let ffmpegCommand = null;
 let ffmpegResolved = false;
 let ffmpegWarned = false;
+let batchJob = null;
 const DEFAULT_PREVIEW_FPS = 2;
 const DEFAULT_PREVIEW_MAX_FRAMES = 24;
 
@@ -90,6 +92,10 @@ function mergeWithMetadata(scanItems, map) {
       ...item,
       status: meta?.status || "unreviewed",
       reviewedAt: meta?.reviewedAt ?? null,
+      critter: meta?.critter ?? null,
+      critterConfidence: meta?.critterConfidence ?? null,
+      critterCheckedAt: meta?.critterCheckedAt ?? null,
+      critterModel: meta?.critterModel ?? null,
     };
   });
 }
@@ -537,6 +543,55 @@ async function scanMedia() {
   return items;
 }
 
+async function moveItemsToTrash(items, results) {
+  if (!Array.isArray(items) || items.length === 0) {
+    return;
+  }
+
+  const trashRoot = path.join(mediaRoot, "Trash");
+  await fsp.mkdir(trashRoot, { recursive: true });
+
+  for (const item of items) {
+    if (!item || !item.path) {
+      continue;
+    }
+    if (item.path.toLowerCase().startsWith("trash/")) {
+      continue;
+    }
+    const srcPath = relPathToFs(item.path);
+    if (!isUnderRoot(srcPath)) {
+      results.errors.push({ path: item.path, error: "Invalid path" });
+      continue;
+    }
+    try {
+      await fsp.access(srcPath, fs.constants.F_OK);
+    } catch {
+      item.missing = true;
+      item.missingAt = new Date().toISOString();
+      results.missing.push(item.path);
+      continue;
+    }
+
+    const destRel = path.posix.join("Trash", item.path);
+    const destPath = relPathToFs(destRel);
+    const destDir = path.dirname(destPath);
+    await fsp.mkdir(destDir, { recursive: true });
+
+    try {
+      await fsp.rename(srcPath, destPath);
+      if (!item.originalPath) {
+        item.originalPath = item.path;
+      }
+      item.path = destRel;
+      item.movedAt = new Date().toISOString();
+      results.moved.push(destRel);
+      console.log(`Moved to Trash: ${destRel}`);
+    } catch (err) {
+      results.errors.push({ path: item.path, error: err.message });
+    }
+  }
+}
+
 async function syncMetadata(scanItems) {
   const map = buildMetadataMap();
   let changed = false;
@@ -550,6 +605,11 @@ async function syncMetadata(scanItems) {
         reviewedAt: null,
         caption: "",
         ai: null,
+        critter: null,
+        critterConfidence: null,
+        critterCheckedAt: null,
+        critterModel: null,
+        critterError: null,
       });
       changed = true;
     } else {
@@ -559,6 +619,26 @@ async function syncMetadata(scanItems) {
       }
       if (!Object.prototype.hasOwnProperty.call(existing, "reviewedAt")) {
         existing.reviewedAt = null;
+        changed = true;
+      }
+      if (!Object.prototype.hasOwnProperty.call(existing, "critter")) {
+        existing.critter = null;
+        changed = true;
+      }
+      if (!Object.prototype.hasOwnProperty.call(existing, "critterConfidence")) {
+        existing.critterConfidence = null;
+        changed = true;
+      }
+      if (!Object.prototype.hasOwnProperty.call(existing, "critterCheckedAt")) {
+        existing.critterCheckedAt = null;
+        changed = true;
+      }
+      if (!Object.prototype.hasOwnProperty.call(existing, "critterModel")) {
+        existing.critterModel = null;
+        changed = true;
+      }
+      if (!Object.prototype.hasOwnProperty.call(existing, "critterError")) {
+        existing.critterError = null;
         changed = true;
       }
     }
@@ -606,6 +686,430 @@ app.get("/api/library", async (req, res) => {
     console.error("Failed to list library:", err.message);
     res.status(500).json({ error: "Failed to scan media" });
   }
+});
+
+function getOpenRouterConfig() {
+  const apiKey = process.env.OPENROUTER_API_KEY;
+  const model =
+    process.env.OPENROUTER_MODEL ||
+    appConfig.openrouterModel ||
+    "openai/gpt-4o-mini";
+  const referrer =
+    process.env.OPENROUTER_REFERRER || "http://localhost:3000";
+  return { apiKey, model, referrer };
+}
+
+function postJson(urlString, headers, payload) {
+  return new Promise((resolve, reject) => {
+    const urlObj = new URL(urlString);
+    const data = JSON.stringify(payload);
+    const options = {
+      method: "POST",
+      hostname: urlObj.hostname,
+      path: urlObj.pathname,
+      port: urlObj.port || 443,
+      headers: {
+        "Content-Type": "application/json",
+        "Content-Length": Buffer.byteLength(data),
+        ...headers,
+      },
+    };
+
+    const req = require("https").request(options, (res) => {
+      let body = "";
+      res.on("data", (chunk) => (body += chunk.toString("utf8")));
+      res.on("end", () => {
+        resolve({ status: res.statusCode || 0, body });
+      });
+    });
+    req.on("error", reject);
+    req.write(data);
+    req.end();
+  });
+}
+
+function coerceConfidence(value) {
+  if (typeof value !== "number" || Number.isNaN(value)) {
+    return null;
+  }
+  let normalized = value;
+  if (normalized > 1 && normalized <= 100) {
+    normalized = normalized / 100;
+  }
+  normalized = Math.max(0, Math.min(1, normalized));
+  return normalized;
+}
+
+function parseCritterResponse(text) {
+  if (!text) {
+    return null;
+  }
+  const trimmed = text.trim();
+  let parsed;
+  try {
+    parsed = JSON.parse(trimmed);
+  } catch {
+    const match = trimmed.match(/\{[\s\S]*\}/);
+    if (!match) {
+      return null;
+    }
+    try {
+      parsed = JSON.parse(match[0]);
+    } catch {
+      return null;
+    }
+  }
+
+  const critterRaw = parsed.critter;
+  let critter = null;
+  if (typeof critterRaw === "boolean") {
+    critter = critterRaw;
+  } else if (typeof critterRaw === "string") {
+    const lower = critterRaw.toLowerCase();
+    if (lower === "true" || lower === "yes") {
+      critter = true;
+    } else if (lower === "false" || lower === "no") {
+      critter = false;
+    }
+  } else if (typeof critterRaw === "number") {
+    critter = critterRaw > 0;
+  }
+
+  const confidence = coerceConfidence(parsed.confidence);
+  if (critter === null) {
+    return null;
+  }
+  return { critter, confidence };
+}
+
+async function getCritterImageInfo(item) {
+  if (!item || !item.path) {
+    return null;
+  }
+  if (item.type === "image") {
+    const fsPath = relPathToFs(item.path);
+    if (!isUnderRoot(fsPath)) {
+      return null;
+    }
+    return {
+      fsPath,
+      relPath: item.path,
+    };
+  }
+
+  let frames = await listPreviewFrames(item.path);
+  if (frames.length === 0) {
+    frames = await generatePreviewFrames(item.path);
+  }
+  if (frames.length > 0) {
+    const relPath = frames[0];
+    const fsPath = relPathToFs(relPath);
+    if (isUnderRoot(fsPath)) {
+      return { fsPath, relPath };
+    }
+  }
+
+  const preview = await findPreview(item.path);
+  if (preview) {
+    return { fsPath: preview.fsPath, relPath: preview.relPath };
+  }
+
+  return null;
+}
+
+async function callOpenRouterForCritter(imageInfo, model) {
+  const { apiKey, referrer } = getOpenRouterConfig();
+  if (!apiKey) {
+    return { error: "missing_key" };
+  }
+  const ext = path.extname(imageInfo.fsPath).toLowerCase();
+  const mime = getContentType(ext);
+  const buffer = await fsp.readFile(imageInfo.fsPath);
+  const base64 = buffer.toString("base64");
+  const imageUrl = `data:${mime};base64,${base64}`;
+
+  const payload = {
+    model,
+    temperature: 0,
+    messages: [
+      {
+        role: "system",
+        content:
+          "You are a vision classifier. Reply with JSON only: {\"critter\": true|false, \"confidence\": 0-1}.",
+      },
+      {
+        role: "user",
+        content: [
+          {
+            type: "text",
+            text:
+              "Detect whether a visible animal is present. Return JSON only with critter and confidence.",
+          },
+          {
+            type: "image_url",
+            image_url: { url: imageUrl },
+          },
+        ],
+      },
+    ],
+  };
+
+  const headers = {
+    Authorization: `Bearer ${apiKey}`,
+    "HTTP-Referer": referrer,
+    "X-Title": "CamReview",
+  };
+
+  const response = await postJson(OPENROUTER_ENDPOINT, headers, payload);
+  if (response.status < 200 || response.status >= 300) {
+    return { error: `openrouter_${response.status}` };
+  }
+  let data;
+  try {
+    data = JSON.parse(response.body);
+  } catch {
+    return { error: "parse_error" };
+  }
+  const content = data?.choices?.[0]?.message?.content || "";
+  const parsed = parseCritterResponse(content);
+  if (!parsed) {
+    return { error: "invalid_response" };
+  }
+  return { ...parsed };
+}
+
+async function detectCritterForPath(targetPath) {
+  const scanItems = await scanMedia();
+  const map = await syncMetadata(scanItems);
+  const normalizedTarget = normalizeRelPath(targetPath);
+  const item = scanItems.find((entry) => entry.path === normalizedTarget);
+  if (!item) {
+    return { error: "not_found", status: 404 };
+  }
+  if (item.type !== "image") {
+    return { error: "not_image", status: 400 };
+  }
+  const meta = map.get(item.path);
+  if (!meta) {
+    return { error: "not_found", status: 404 };
+  }
+
+  if (typeof meta.critter === "boolean") {
+    return {
+      result: {
+        critter: meta.critter,
+        confidence: meta.critterConfidence,
+        model: meta.critterModel,
+        cached: true,
+      },
+    };
+  }
+
+  const model = getOpenRouterConfig().model;
+  const imageInfo = await getCritterImageInfo(item);
+  if (!imageInfo) {
+    meta.critterError = "no_preview";
+    meta.critterCheckedAt = new Date().toISOString();
+    meta.critterModel = model;
+    metadata.items = Array.from(map.values());
+    await saveMetadata();
+    return { error: "no_preview", status: 500 };
+  }
+
+  const result = await callOpenRouterForCritter(imageInfo, model);
+  if (result.error) {
+    meta.critterError = result.error;
+    meta.critterCheckedAt = new Date().toISOString();
+    meta.critterModel = model;
+    metadata.items = Array.from(map.values());
+    await saveMetadata();
+    return { error: result.error, status: 502 };
+  }
+
+  meta.critter = result.critter;
+  meta.critterConfidence = result.confidence;
+  meta.critterCheckedAt = new Date().toISOString();
+  meta.critterModel = model;
+  meta.critterError = null;
+  metadata.items = Array.from(map.values());
+  await saveMetadata();
+
+  return {
+    result: {
+      critter: result.critter,
+      confidence: result.confidence,
+      model,
+    },
+  };
+}
+
+async function runBatchCritterDeleteJob(jobId, scope) {
+  const scanItems = await scanMedia();
+  const map = await syncMetadata(scanItems);
+  const model = getOpenRouterConfig().model;
+
+  if (!batchJob || batchJob.id !== jobId) {
+    return;
+  }
+  batchJob.status = "running";
+  batchJob.phase = "detecting";
+
+  const candidates = scanItems.filter((item) => {
+    if (item.type !== "image") {
+      return false;
+    }
+    const meta = map.get(item.path);
+    if (!meta) {
+      return false;
+    }
+    if (scope === "unreviewed" && meta.status !== "unreviewed") {
+      return false;
+    }
+    return true;
+  });
+
+  batchJob.total = candidates.length;
+
+  const toTrash = [];
+  for (const item of candidates) {
+    const meta = map.get(item.path);
+    if (!meta) {
+      continue;
+    }
+    try {
+      let critter = meta.critter;
+      let confidence = meta.critterConfidence;
+
+      if (typeof critter !== "boolean") {
+        const imageInfo = await getCritterImageInfo(item);
+        if (!imageInfo) {
+          meta.critterError = "no_preview";
+          meta.critterCheckedAt = new Date().toISOString();
+          meta.critterModel = model;
+          batchJob.failed += 1;
+        } else {
+          const result = await callOpenRouterForCritter(imageInfo, model);
+          if (result.error) {
+            meta.critterError = result.error;
+            meta.critterCheckedAt = new Date().toISOString();
+            meta.critterModel = model;
+            batchJob.failed += 1;
+          } else {
+            critter = result.critter;
+            confidence = result.confidence;
+            meta.critter = result.critter;
+            meta.critterConfidence = result.confidence;
+            meta.critterCheckedAt = new Date().toISOString();
+            meta.critterModel = model;
+            meta.critterError = null;
+          }
+        }
+      }
+
+      if (typeof critter === "boolean") {
+        if (critter) {
+          batchJob.matched += 1;
+        } else {
+          batchJob.deleted += 1;
+          meta.status = "delete";
+          meta.reviewedAt = new Date().toISOString();
+          toTrash.push(meta);
+        }
+      }
+    } catch (err) {
+      meta.critterError = "exception";
+      meta.critterCheckedAt = new Date().toISOString();
+      batchJob.failed += 1;
+    } finally {
+      batchJob.processed += 1;
+      metadata.items = Array.from(map.values());
+      await saveMetadata();
+    }
+  }
+
+  batchJob.status = "done";
+  batchJob.finishedAt = new Date().toISOString();
+}
+
+app.post("/api/detect-critters", async (req, res) => {
+  const payload = req.body || {};
+  const targetPath = payload.path ? normalizeRelPath(payload.path) : "";
+
+  const { apiKey } = getOpenRouterConfig();
+  if (!apiKey) {
+    res.status(400).json({ ok: false, error: "missing_key" });
+    return;
+  }
+
+  if (!targetPath) {
+    res.status(400).json({ ok: false, error: "missing_path" });
+    return;
+  }
+
+  const ext = path.posix.extname(targetPath).toLowerCase();
+  if (![".jpg", ".jpeg", ".png"].includes(ext)) {
+    res.status(400).json({ ok: false, error: "not_image" });
+    return;
+  }
+
+  try {
+    const { result, error, status } = await detectCritterForPath(targetPath);
+    if (error) {
+      res.status(status || 500).json({ ok: false, error });
+      return;
+    }
+    res.json({ ok: true, result });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: "detect_failed" });
+  }
+});
+
+app.post("/api/detect-critters/batch-delete", async (req, res) => {
+  if (batchJob && batchJob.status === "running") {
+    res.status(409).json({ ok: false, error: "job_running", job: batchJob });
+    return;
+  }
+
+  const payload = req.body || {};
+  const scope = payload.scope === "all" ? "all" : "unreviewed";
+
+  const { apiKey } = getOpenRouterConfig();
+  if (!apiKey) {
+    res.status(400).json({ ok: false, error: "missing_key" });
+    return;
+  }
+
+  batchJob = {
+    id: Date.now().toString(36),
+    status: "starting",
+    phase: "detecting",
+    total: 0,
+    processed: 0,
+    matched: 0,
+    deleted: 0,
+    failed: 0,
+    startedAt: new Date().toISOString(),
+    finishedAt: null,
+    error: null,
+  };
+
+  runBatchCritterDeleteJob(batchJob.id, scope).catch((err) => {
+    if (batchJob && batchJob.id) {
+      batchJob.status = "error";
+      batchJob.error = err.message;
+      batchJob.finishedAt = new Date().toISOString();
+    }
+  });
+
+  res.json({ ok: true, job: batchJob });
+});
+
+app.get("/api/detect-critters/batch-delete/status", (req, res) => {
+  if (!batchJob) {
+    res.json({ ok: true, status: "idle" });
+    return;
+  }
+  res.json({ ok: true, job: batchJob });
 });
 
 app.post("/api/action", async (req, res) => {
@@ -684,45 +1188,7 @@ app.post("/api/apply-deletes", async (req, res) => {
     return;
   }
 
-  const trashRoot = path.join(mediaRoot, "Trash");
-  await fsp.mkdir(trashRoot, { recursive: true });
-
-  for (const item of deleteItems) {
-    if (item.path.toLowerCase().startsWith("trash/")) {
-      continue;
-    }
-    const srcPath = relPathToFs(item.path);
-    if (!isUnderRoot(srcPath)) {
-      results.errors.push({ path: item.path, error: "Invalid path" });
-      continue;
-    }
-    try {
-      await fsp.access(srcPath, fs.constants.F_OK);
-    } catch {
-      item.missing = true;
-      item.missingAt = new Date().toISOString();
-      results.missing.push(item.path);
-      continue;
-    }
-
-    const destRel = path.posix.join("Trash", item.path);
-    const destPath = relPathToFs(destRel);
-    const destDir = path.dirname(destPath);
-    await fsp.mkdir(destDir, { recursive: true });
-
-    try {
-      await fsp.rename(srcPath, destPath);
-      if (!item.originalPath) {
-        item.originalPath = item.path;
-      }
-      item.path = destRel;
-      item.movedAt = new Date().toISOString();
-      results.moved.push(destRel);
-      console.log(`Moved to Trash: ${destRel}`);
-    } catch (err) {
-      results.errors.push({ path: item.path, error: err.message });
-    }
-  }
+  await moveItemsToTrash(deleteItems, results);
 
   if (favoriteItems.length > 0) {
     const favoritesRoot = path.join(mediaRoot, "Favorites");

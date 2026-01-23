@@ -212,7 +212,7 @@ body.resizing {
 
 .secondary {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
   gap: 10px;
 }
 
@@ -228,6 +228,34 @@ body.resizing {
 
 .btn:active {
   transform: translateY(1px) scale(0.99);
+}
+
+.btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.btn-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 12px 10px;
+}
+
+.btn-stack .btn-title {
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.btn-stack .btn-sub {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
 }
 
 .keep {

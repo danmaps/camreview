@@ -27,6 +27,8 @@ const elements = {
   undoBtn: document.getElementById("undoBtn"),
   applyBtn: document.getElementById("applyBtn"),
   refreshBtn: document.getElementById("refreshBtn"),
+  detectBtn: document.getElementById("detectBtn"),
+  batchDeleteBtn: document.getElementById("batchDeleteBtn"),
   prevBtn: document.getElementById("prevBtn"),
   nextBtn: document.getElementById("nextBtn"),
   libraryToggle: document.getElementById("libraryToggle"),
@@ -62,6 +64,9 @@ const transcodeMap = new Map();
 let previewFrames = [];
 let previewFrameIndex = 0;
 let previewTimer = null;
+let detectInFlight = false;
+let batchDetectInFlight = false;
+let batchPollTimer = null;
 const swipeState = {
   pointerId: null,
   startX: 0,
@@ -140,6 +145,29 @@ function updateProgress() {
   }
 }
 
+function updateDetectButton(item) {
+  if (!elements.detectBtn) {
+    return;
+  }
+  const isImage = item && item.type === "image";
+  elements.detectBtn.disabled = !isImage || detectInFlight;
+  elements.detectBtn.textContent = detectInFlight
+    ? "Detecting..."
+    : "Detect Animals";
+  if (!isImage) {
+    elements.detectBtn.title = "Detect Animals is available for images only.";
+  } else {
+    elements.detectBtn.title = "";
+  }
+}
+
+function updateBatchButton() {
+  if (!elements.batchDeleteBtn) {
+    return;
+  }
+  elements.batchDeleteBtn.disabled = batchDetectInFlight;
+}
+
 function updateNavButtons() {
   const list = getActiveList();
   const enabled = list.length > 1;
@@ -195,6 +223,25 @@ function formatReviewed(ts) {
   return new Date(parsed).toLocaleString();
 }
 
+function formatCritter(value) {
+  if (value === true) {
+    return "Yes";
+  }
+  if (value === false) {
+    return "No";
+  }
+  return "—";
+}
+
+function formatConfidence(value) {
+  if (typeof value !== "number" || Number.isNaN(value)) {
+    return "—";
+  }
+  const normalized = value > 1 && value <= 100 ? value / 100 : value;
+  const percent = Math.max(0, Math.min(1, normalized));
+  return `${Math.round(percent * 100)}%`;
+}
+
 function updateActiveRow() {
   const active = currentPath();
   if (!elements.libraryBody) {
@@ -211,7 +258,19 @@ function updateActiveRow() {
   });
   if (activeRow && elements.libraryPanel) {
     if (!elements.libraryPanel.classList.contains("collapsed")) {
-      activeRow.scrollIntoView({ block: "nearest" });
+      const container = elements.libraryPanel.querySelector(".library-table");
+      if (container) {
+        const containerRect = container.getBoundingClientRect();
+        const rowRect = activeRow.getBoundingClientRect();
+        const padding = 28;
+        if (rowRect.top < containerRect.top + padding) {
+          container.scrollTop -= containerRect.top + padding - rowRect.top;
+        } else if (rowRect.bottom > containerRect.bottom - padding) {
+          container.scrollTop += rowRect.bottom - (containerRect.bottom - padding);
+        }
+      } else {
+        activeRow.scrollIntoView({ block: "nearest" });
+      }
     }
   }
 }
@@ -264,6 +323,12 @@ function renderLibrary() {
     const statusCell = document.createElement("td");
     statusCell.textContent = (item.status || "unreviewed").toUpperCase();
 
+    const critterCell = document.createElement("td");
+    critterCell.textContent = formatCritter(item.critter);
+
+    const confidenceCell = document.createElement("td");
+    confidenceCell.textContent = formatConfidence(item.critterConfidence);
+
     const reviewedCell = document.createElement("td");
     reviewedCell.textContent = formatReviewed(item.reviewedAt);
 
@@ -274,6 +339,8 @@ function renderLibrary() {
       modifiedCell,
       sizeCell,
       statusCell,
+      critterCell,
+      confidenceCell,
       reviewedCell
     );
     fragment.appendChild(row);
@@ -592,11 +659,13 @@ function render() {
   if (!item) {
     showEmpty();
     updateActiveRow();
+    updateDetectButton(null);
     return;
   }
   resetSwipeUI();
   showMedia(item);
   updateActiveRow();
+  updateDetectButton(item);
 }
 
 function selectLibraryPath(path) {
@@ -750,12 +819,181 @@ async function applyDeletes() {
   await fetchItems();
 }
 
+async function startDetectCritters() {
+  if (detectInFlight) {
+    return;
+  }
+  detectInFlight = true;
+  updateDetectButton(currentItem());
+  setStatus("Starting AI detection...");
+  try {
+    const item = currentItem();
+    if (!item || item.type !== "image") {
+      detectInFlight = false;
+      updateDetectButton(item || null);
+      setStatus("Select an image to detect animals.");
+      return;
+    }
+    const response = await fetch("/api/detect-critters", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path: item.path }),
+    });
+    const data = await response.json();
+    if (!response.ok || !data.ok) {
+      detectInFlight = false;
+      updateDetectButton(item);
+      if (data.error === "missing_key") {
+        setStatus("Set OPENROUTER_API_KEY on the server to enable AI.");
+      } else if (data.error === "not_image") {
+        setStatus("AI detection is only available for images.");
+      } else if (data.error === "missing_path") {
+        setStatus("Select an image to detect animals.");
+      } else if (data.error === "job_running") {
+        setStatus("AI detection already running.");
+      } else if (data.error === "no_preview") {
+        setStatus("No preview available to send to AI.");
+      } else if (data.error === "not_found") {
+        setStatus("Image not found.");
+      } else {
+        setStatus("AI detection failed.");
+      }
+      return;
+    }
+
+    const result = data.result;
+    if (result && typeof result.critter === "boolean") {
+      const modelLabel = result.model || "AI";
+      const confidence = formatConfidence(result.confidence);
+      if (result.critter) {
+        setStatus(
+          `${modelLabel} is ${confidence} sure you're seeing an animal!`
+        );
+      } else {
+        setStatus(
+          `${modelLabel} is ${confidence} sure this is not an animal.`
+        );
+      }
+    } else {
+      setStatus("AI detection complete.");
+    }
+
+    detectInFlight = false;
+    updateDetectButton(currentItem());
+    await fetchItems(currentPath());
+  } catch {
+    detectInFlight = false;
+    updateDetectButton(currentItem());
+    setStatus("AI detection failed.");
+  }
+}
+
+function stopBatchPolling() {
+  if (batchPollTimer) {
+    window.clearInterval(batchPollTimer);
+    batchPollTimer = null;
+  }
+}
+
+async function pollBatchStatus() {
+  try {
+    const response = await fetch("/api/detect-critters/batch-delete/status");
+    const data = await response.json();
+    if (!data.ok) {
+      throw new Error("Status error");
+    }
+    if (data.status === "idle") {
+      stopBatchPolling();
+      batchDetectInFlight = false;
+      updateBatchButton();
+      return;
+    }
+    const job = data.job;
+    if (!job) {
+      return;
+    }
+    if (job.status === "starting") {
+      setStatus("AI batch delete is starting...");
+    } else if (job.status === "running") {
+      setStatus(
+        `AI batch delete... ${job.processed}/${job.total} | animals ${job.matched} | delete ${job.deleted}`
+      );
+    } else if (job.status === "done") {
+      stopBatchPolling();
+      batchDetectInFlight = false;
+      updateBatchButton();
+      setStatus(
+        `AI batch delete done. Marked ${job.deleted} for delete.`
+      );
+      await fetchItems();
+    } else if (job.status === "error") {
+      stopBatchPolling();
+      batchDetectInFlight = false;
+      updateBatchButton();
+      setStatus("AI batch delete failed. Check server logs.");
+    }
+  } catch {
+    stopBatchPolling();
+    batchDetectInFlight = false;
+    updateBatchButton();
+    setStatus("AI batch status check failed.");
+  }
+}
+
+async function startBatchDelete() {
+  if (batchDetectInFlight) {
+    return;
+  }
+  batchDetectInFlight = true;
+  updateBatchButton();
+  setStatus("Starting AI batch delete...");
+  try {
+    const response = await fetch("/api/detect-critters/batch-delete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ scope: "unreviewed" }),
+    });
+    const data = await response.json();
+    if (!response.ok || !data.ok) {
+      batchDetectInFlight = false;
+      updateBatchButton();
+      if (data.error === "missing_key") {
+        setStatus("Set OPENROUTER_API_KEY on the server to enable AI.");
+      } else if (data.error === "job_running") {
+        setStatus("AI batch delete already running.");
+        batchDetectInFlight = true;
+      } else {
+        setStatus("AI batch delete failed to start.");
+      }
+      if (data.error === "job_running") {
+        stopBatchPolling();
+        batchPollTimer = window.setInterval(pollBatchStatus, 1200);
+        pollBatchStatus();
+      }
+      return;
+    }
+    stopBatchPolling();
+    batchPollTimer = window.setInterval(pollBatchStatus, 1200);
+    pollBatchStatus();
+  } catch {
+    batchDetectInFlight = false;
+    updateBatchButton();
+    setStatus("AI batch delete failed to start.");
+  }
+}
+
 elements.keepBtn.addEventListener("click", () => sendAction("keep"));
 elements.deleteBtn.addEventListener("click", () => sendAction("delete"));
 elements.favoriteBtn.addEventListener("click", () => sendAction("favorite"));
 elements.undoBtn.addEventListener("click", undoLast);
 elements.applyBtn.addEventListener("click", applyDeletes);
 elements.refreshBtn.addEventListener("click", () => fetchItems());
+if (elements.detectBtn) {
+  elements.detectBtn.addEventListener("click", startDetectCritters);
+}
+if (elements.batchDeleteBtn) {
+  elements.batchDeleteBtn.addEventListener("click", startBatchDelete);
+}
 elements.prevBtn.addEventListener("click", () => moveIndex(-1));
 elements.nextBtn.addEventListener("click", () => moveIndex(1));
 if (elements.libraryToggle) {
@@ -1096,6 +1334,9 @@ try {
 }
 applyLibraryWidth(getStoredLibraryWidth(), false);
 setLibraryOpen(initialLibraryOpen);
+updateDetectButton(currentItem());
+updateBatchButton();
+pollBatchStatus();
 
 fetchItems().catch(() => {
   setStatus("Failed to load items");
