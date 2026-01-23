@@ -13,47 +13,98 @@
     <div class="app">
       <header class="topbar">
         <div class="brand">CamReview</div>
-        <div class="progress" id="progressText">0 / 0</div>
+        <div class="topbar-right">
+          <div class="progress" id="progressText">0 / 0</div>
+          <button class="topbar-btn" id="libraryToggle" type="button">
+            List
+          </button>
+        </div>
       </header>
 
-      <main class="viewer" id="viewer">
-        <div class="media-card" id="mediaCard">
-          <img
-            id="imageView"
-            class="media hidden"
-            alt="Trail camera image"
-            draggable="false"
-          />
-          <img
-            id="previewView"
-            class="media hidden"
-            alt="Video preview"
-            draggable="false"
-          />
-          <video
-            id="videoView"
-            class="media hidden"
-            controls
-            playsinline
-            muted
-            autoplay
-            loop
-          ></video>
-        </div>
-        <div class="overlay">
-          <div class="swipe-label keep" id="swipeKeep">KEEP</div>
-          <div class="swipe-label delete" id="swipeDelete">DELETE</div>
-          <div class="swipe-label favorite" id="swipeFavorite">FAVORITE</div>
-        </div>
-        <div id="emptyState" class="empty hidden">
-          <div class="empty-title">Queue cleared</div>
-          <div class="empty-subtitle">No unreviewed items remain.</div>
-        </div>
-      </main>
+      <div class="content">
+        <main class="viewer" id="viewer">
+          <div class="media-card" id="mediaCard">
+            <img
+              id="imageView"
+              class="media hidden"
+              alt="Trail camera image"
+              draggable="false"
+            />
+            <img
+              id="previewView"
+              class="media hidden"
+              alt="Video preview"
+              draggable="false"
+            />
+            <video
+              id="videoView"
+              class="media hidden"
+              controls
+              playsinline
+              muted
+              autoplay
+              loop
+            ></video>
+          </div>
+          <div class="nav">
+            <button class="nav-arrow nav-prev" id="prevBtn" aria-label="Previous">
+              &#x2039;
+            </button>
+            <button class="nav-arrow nav-next" id="nextBtn" aria-label="Next">
+              &#x203A;
+            </button>
+          </div>
+          <div class="overlay">
+            <div class="swipe-label keep" id="swipeKeep">KEEP</div>
+            <div class="swipe-label delete" id="swipeDelete">DELETE</div>
+            <div class="swipe-label favorite" id="swipeFavorite">FAVORITE</div>
+          </div>
+          <div id="emptyState" class="empty hidden">
+            <div class="empty-title">Queue cleared</div>
+            <div class="empty-subtitle">No unreviewed items remain.</div>
+          </div>
+        </main>
+        <div class="library-resizer" id="libraryResizer" aria-hidden="true"></div>
+        <aside class="library collapsed" id="libraryPanel" aria-hidden="true">
+          <div class="library-header">
+            <div class="library-controls">
+              <input
+                id="librarySearch"
+                type="search"
+                placeholder="Search"
+                autocomplete="off"
+              />
+              <select id="libraryFilter">
+                <option value="all">All</option>
+                <option value="unreviewed">Unreviewed</option>
+                <option value="keep">Keep</option>
+                <option value="favorite">Favorite</option>
+                <option value="delete">Delete</option>
+              </select>
+            </div>
+            <div class="library-meta" id="libraryMeta"></div>
+          </div>
+          <div class="library-table">
+            <table>
+              <thead>
+                <tr>
+                  <th>Type</th>
+                  <th>Name</th>
+                  <th>Folder</th>
+                  <th>Captured</th>
+                  <th>Size</th>
+                  <th>Status</th>
+                  <th>Reviewed</th>
+                </tr>
+              </thead>
+              <tbody id="libraryBody"></tbody>
+            </table>
+          </div>
+        </aside>
+      </div>
 
       <div class="file-info" id="fileInfo">
         <span class="file-name" id="fileName"></span>
-        <span class="file-ext" id="fileExt"></span>
       </div>
 
       <section class="controls">

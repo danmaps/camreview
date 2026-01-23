@@ -8,6 +8,7 @@ Fast, local-only review of trail camera media on Windows. No cloud. No Docker. S
 - Swipe gestures and big buttons (mobile-first)
 - Undo last action
 - Safe deletes (moves into `Trash/`)
+- Favorites move into `Favorites/` on apply
 - Persistent JSON metadata
 - Video streaming with phone-friendly fallback
 
@@ -51,6 +52,7 @@ npm run dev
 
 - Delete marks the file only.
 - "Apply Changes" moves delete-marked files into `Trash/` under `mediaRoot`.
+- "Apply Changes" moves favorite-marked files into `Favorites/` under `mediaRoot`.
 - No permanent deletes in v0.
 
 ## Metadata
@@ -87,7 +89,7 @@ See `config.example.json`. Options:
 - `GET /api/items` -> list unreviewed items
 - `POST /api/action` -> mark keep/delete/favorite
 - `POST /api/undo` -> undo last action
-- `POST /api/apply-deletes` -> move delete-marked files to Trash
+- `POST /api/apply-deletes` -> move delete-marked files to Trash, favorites to Favorites
 - `GET /api/preview-frames?path=...&generate=1` -> list or generate preview frames
 - `POST /api/transcode` -> create phone-friendly H.264 MP4
 - `GET /media?path=...` -> stream image/video

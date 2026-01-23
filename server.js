@@ -83,6 +83,17 @@ function getPreviewSettings() {
   };
 }
 
+function mergeWithMetadata(scanItems, map) {
+  return scanItems.map((item) => {
+    const meta = map.get(item.path);
+    return {
+      ...item,
+      status: meta?.status || "unreviewed",
+      reviewedAt: meta?.reviewedAt ?? null,
+    };
+  });
+}
+
 async function resolveFfmpegCommand() {
   if (ffmpegResolved) {
     return ffmpegCommand;
@@ -492,9 +503,20 @@ async function walkDir(dirPath, items) {
       if (rel.startsWith("..")) {
         continue;
       }
+      const relPath = normalizeRelPath(rel);
+      const parsed = path.posix.parse(relPath);
+      const birthtimeMs = Number(stat.birthtimeMs);
+      const capturedAtMs =
+        Number.isFinite(birthtimeMs) && birthtimeMs > 0
+          ? birthtimeMs
+          : stat.mtimeMs;
       items.push({
-        path: normalizeRelPath(rel),
+        path: relPath,
+        name: parsed.base,
+        folder: parsed.dir || ".",
         mtimeMs: stat.mtimeMs,
+        capturedAtMs,
+        sizeBytes: stat.size,
         type: getMediaType(ext),
       });
     } catch (err) {
@@ -506,7 +528,12 @@ async function walkDir(dirPath, items) {
 async function scanMedia() {
   const items = [];
   await walkDir(mediaRoot, items);
-  items.sort((a, b) => a.mtimeMs - b.mtimeMs);
+  items.sort((a, b) => {
+    if (a.capturedAtMs === b.capturedAtMs) {
+      return a.path.localeCompare(b.path);
+    }
+    return a.capturedAtMs - b.capturedAtMs;
+  });
   return items;
 }
 
@@ -549,7 +576,8 @@ app.get("/api/items", async (req, res) => {
   try {
     const scanItems = await scanMedia();
     const map = await syncMetadata(scanItems);
-    const unreviewed = scanItems.filter((item) => {
+    const merged = mergeWithMetadata(scanItems, map);
+    const unreviewed = merged.filter((item) => {
       const meta = map.get(item.path);
       return meta && meta.status === "unreviewed";
     });
@@ -564,6 +592,18 @@ app.get("/api/items", async (req, res) => {
     });
   } catch (err) {
     console.error("Failed to list items:", err.message);
+    res.status(500).json({ error: "Failed to scan media" });
+  }
+});
+
+app.get("/api/library", async (req, res) => {
+  try {
+    const scanItems = await scanMedia();
+    const map = await syncMetadata(scanItems);
+    const merged = mergeWithMetadata(scanItems, map);
+    res.json({ items: merged });
+  } catch (err) {
+    console.error("Failed to list library:", err.message);
     res.status(500).json({ error: "Failed to scan media" });
   }
 });
@@ -627,9 +667,19 @@ app.post("/api/apply-deletes", async (req, res) => {
   const deleteItems = metadata.items.filter(
     (item) => item.status === "delete"
   );
-  const results = { moved: [], missing: [], errors: [] };
+  const favoriteItems = metadata.items.filter(
+    (item) => item.status === "favorite"
+  );
+  const results = {
+    moved: [],
+    missing: [],
+    errors: [],
+    favoritesMoved: [],
+    favoritesMissing: [],
+    favoritesErrors: [],
+  };
 
-  if (deleteItems.length === 0) {
+  if (deleteItems.length === 0 && favoriteItems.length === 0) {
     res.json({ ok: true, ...results });
     return;
   }
@@ -671,6 +721,49 @@ app.post("/api/apply-deletes", async (req, res) => {
       console.log(`Moved to Trash: ${destRel}`);
     } catch (err) {
       results.errors.push({ path: item.path, error: err.message });
+    }
+  }
+
+  if (favoriteItems.length > 0) {
+    const favoritesRoot = path.join(mediaRoot, "Favorites");
+    await fsp.mkdir(favoritesRoot, { recursive: true });
+  }
+
+  for (const item of favoriteItems) {
+    const lower = item.path.toLowerCase();
+    if (lower.startsWith("favorites/") || lower.startsWith("trash/")) {
+      continue;
+    }
+    const srcPath = relPathToFs(item.path);
+    if (!isUnderRoot(srcPath)) {
+      results.favoritesErrors.push({ path: item.path, error: "Invalid path" });
+      continue;
+    }
+    try {
+      await fsp.access(srcPath, fs.constants.F_OK);
+    } catch {
+      item.missing = true;
+      item.missingAt = new Date().toISOString();
+      results.favoritesMissing.push(item.path);
+      continue;
+    }
+
+    const destRel = path.posix.join("Favorites", item.path);
+    const destPath = relPathToFs(destRel);
+    const destDir = path.dirname(destPath);
+    await fsp.mkdir(destDir, { recursive: true });
+
+    try {
+      await fsp.rename(srcPath, destPath);
+      if (!item.originalPath) {
+        item.originalPath = item.path;
+      }
+      item.path = destRel;
+      item.favoritedAt = new Date().toISOString();
+      results.favoritesMoved.push(destRel);
+      console.log(`Moved to Favorites: ${destRel}`);
+    } catch (err) {
+      results.favoritesErrors.push({ path: item.path, error: err.message });
     }
   }
 
