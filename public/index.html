@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover"
+    />
+    <title>CamReview</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app">
+      <header class="topbar">
+        <div class="brand">CamReview</div>
+        <div class="progress" id="progressText">0 / 0</div>
+      </header>
+
+      <main class="viewer" id="viewer">
+        <div class="media-card" id="mediaCard">
+          <img
+            id="imageView"
+            class="media hidden"
+            alt="Trail camera image"
+            draggable="false"
+          />
+          <img
+            id="previewView"
+            class="media hidden"
+            alt="Video preview"
+            draggable="false"
+          />
+          <video
+            id="videoView"
+            class="media hidden"
+            controls
+            playsinline
+            muted
+            autoplay
+            loop
+          ></video>
+        </div>
+        <div class="overlay">
+          <div class="swipe-label keep" id="swipeKeep">KEEP</div>
+          <div class="swipe-label delete" id="swipeDelete">DELETE</div>
+          <div class="swipe-label favorite" id="swipeFavorite">FAVORITE</div>
+        </div>
+        <div id="emptyState" class="empty hidden">
+          <div class="empty-title">Queue cleared</div>
+          <div class="empty-subtitle">No unreviewed items remain.</div>
+        </div>
+      </main>
+
+      <div class="file-info" id="fileInfo">
+        <span class="file-name" id="fileName"></span>
+        <span class="file-ext" id="fileExt"></span>
+      </div>
+
+      <section class="controls">
+        <button class="btn keep" id="keepBtn">Keep</button>
+        <button class="btn favorite" id="favoriteBtn">Favorite</button>
+        <button class="btn delete" id="deleteBtn">Delete</button>
+      </section>
+
+      <section class="secondary">
+        <button class="btn ghost" id="undoBtn">Undo</button>
+        <button class="btn ghost" id="applyBtn">Apply Changes</button>
+        <button class="btn ghost" id="refreshBtn">Refresh</button>
+      </section>
+
+      <footer class="status" id="status"></footer>
+    </div>
+
+    <script src="app.js"></script>
+  </body>
+</html>
