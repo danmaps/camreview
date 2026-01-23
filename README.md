@@ -88,7 +88,7 @@ CamReview can call OpenRouter to detect animals. This is opt-in and sends the cu
 image to the OpenRouter model only when you click **Detect Animals** (images only).
 If a result already exists, CamReview reuses the cached value.
 
-You can also run **AI batch delete** to detect animals across unreviewed images and
+You can also run **AI batch detect** to detect animals across all images and
 mark non-animal photos for delete (Apply Changes still controls the move to `Trash/`).
 
 Requirements:

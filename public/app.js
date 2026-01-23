@@ -24,6 +24,7 @@ const elements = {
   swipeKeep: document.getElementById("swipeKeep"),
   swipeDelete: document.getElementById("swipeDelete"),
   swipeFavorite: document.getElementById("swipeFavorite"),
+  batchIndicator: document.getElementById("batchIndicator"),
   undoBtn: document.getElementById("undoBtn"),
   applyBtn: document.getElementById("applyBtn"),
   refreshBtn: document.getElementById("refreshBtn"),
@@ -66,7 +67,10 @@ let previewFrameIndex = 0;
 let previewTimer = null;
 let detectInFlight = false;
 let batchDetectInFlight = false;
-let batchPollTimer = null;
+let batchIndicatorTimer = null;
+let batchQueue = [];
+let batchStats = null;
+let batchResumePath = "";
 const swipeState = {
   pointerId: null,
   startX: 0,
@@ -150,7 +154,7 @@ function updateDetectButton(item) {
     return;
   }
   const isImage = item && item.type === "image";
-  elements.detectBtn.disabled = !isImage || detectInFlight;
+  elements.detectBtn.disabled = !isImage || detectInFlight || batchDetectInFlight;
   elements.detectBtn.textContent = detectInFlight
     ? "Detecting..."
     : "Detect Animals";
@@ -165,7 +169,7 @@ function updateBatchButton() {
   if (!elements.batchDeleteBtn) {
     return;
   }
-  elements.batchDeleteBtn.disabled = batchDetectInFlight;
+  elements.batchDeleteBtn.disabled = batchDetectInFlight || detectInFlight;
 }
 
 function updateNavButtons() {
@@ -335,12 +339,12 @@ function renderLibrary() {
     row.append(
       typeCell,
       nameCell,
+      critterCell,
+      confidenceCell,
+      statusCell,
       folderCell,
       modifiedCell,
       sizeCell,
-      statusCell,
-      critterCell,
-      confidenceCell,
       reviewedCell
     );
     fragment.appendChild(row);
@@ -385,6 +389,110 @@ function setLibraryOpen(open) {
   }
 }
 
+function showLibraryItem(path) {
+  const idx = findLibraryIndexByPath(path);
+  if (idx < 0) {
+    return false;
+  }
+  state.viewMode = "library";
+  state.libraryIndex = idx;
+  render();
+  return true;
+}
+
+function updateLibraryItem(path, updates) {
+  const idx = findLibraryIndexByPath(path);
+  if (idx < 0) {
+    return;
+  }
+  state.library.splice(idx, 1, { ...state.library[idx], ...updates });
+}
+
+function applyLocalAction(path, action) {
+  const queueIndex = findQueueIndexByPath(path);
+  if (queueIndex >= 0) {
+    state.items.splice(queueIndex, 1);
+    state.counts.reviewed += 1;
+    state.counts.remaining = state.items.length;
+    state.counts.total = state.counts.reviewed + state.counts.remaining;
+    if (state.viewMode === "queue") {
+      if (queueIndex < state.index) {
+        state.index = Math.max(0, state.index - 1);
+      }
+      if (state.index >= state.items.length) {
+        state.index = 0;
+      }
+    }
+  }
+
+  const libraryIndex = findLibraryIndexByPath(path);
+  if (libraryIndex >= 0) {
+    const updated = {
+      ...state.library[libraryIndex],
+      status: action,
+      reviewedAt: new Date().toISOString(),
+    };
+    state.library.splice(libraryIndex, 1, updated);
+    if (state.viewMode === "library" && state.libraryIndex === libraryIndex) {
+      state.libraryIndex = libraryIndex;
+    }
+  }
+}
+
+function waitForImageLoad(path) {
+  return new Promise((resolve) => {
+    const item = currentItem();
+    if (!elements.imageView || !item || item.path !== path || item.type !== "image") {
+      resolve();
+      return;
+    }
+    if (elements.imageView.complete && elements.imageView.naturalWidth > 0) {
+      resolve();
+      return;
+    }
+    let done = false;
+    const onLoad = () => {
+      if (done) {
+        return;
+      }
+      done = true;
+      cleanup();
+      resolve();
+    };
+    const cleanup = () => {
+      elements.imageView.removeEventListener("load", onLoad);
+      window.clearTimeout(timer);
+    };
+    const timer = window.setTimeout(() => {
+      if (done) {
+        return;
+      }
+      done = true;
+      cleanup();
+      resolve();
+    }, 1200);
+    elements.imageView.addEventListener("load", onLoad);
+  });
+}
+
+function showBatchIndicator(kind) {
+  if (!elements.batchIndicator) {
+    return Promise.resolve();
+  }
+  if (batchIndicatorTimer) {
+    window.clearTimeout(batchIndicatorTimer);
+    batchIndicatorTimer = null;
+  }
+  elements.batchIndicator.classList.remove("ok", "no", "show");
+  elements.batchIndicator.classList.add(kind, "show");
+  return new Promise((resolve) => {
+    batchIndicatorTimer = window.setTimeout(() => {
+      elements.batchIndicator.classList.remove("show", "ok", "no");
+      batchIndicatorTimer = null;
+      resolve();
+    }, 500);
+  });
+}
 function applyLibraryWidth(width, persist = true) {
   if (!elements.libraryPanel) {
     return;
@@ -744,35 +852,7 @@ async function sendAction(action) {
       resetSwipeUI();
       return;
     }
-
-    const queueIndex = findQueueIndexByPath(item.path);
-    if (queueIndex >= 0) {
-      state.items.splice(queueIndex, 1);
-      state.counts.reviewed += 1;
-      state.counts.remaining = state.items.length;
-      state.counts.total = state.counts.reviewed + state.counts.remaining;
-      if (state.viewMode === "queue") {
-        if (queueIndex < state.index) {
-          state.index = Math.max(0, state.index - 1);
-        }
-        if (state.index >= state.items.length) {
-          state.index = 0;
-        }
-      }
-    }
-
-    const libraryIndex = findLibraryIndexByPath(item.path);
-    if (libraryIndex >= 0) {
-      const updated = {
-        ...state.library[libraryIndex],
-        status: action,
-        reviewedAt: new Date().toISOString(),
-      };
-      state.library.splice(libraryIndex, 1, updated);
-      if (state.viewMode === "library" && state.libraryIndex === libraryIndex) {
-        state.libraryIndex = libraryIndex;
-      }
-    }
+    applyLocalAction(item.path, action);
     setStatus("");
     renderLibrary();
     render();
@@ -821,6 +901,10 @@ async function applyDeletes() {
 
 async function startDetectCritters() {
   if (detectInFlight) {
+    return;
+  }
+  if (batchDetectInFlight) {
+    setStatus("AI batch delete is running.");
     return;
   }
   detectInFlight = true;
@@ -888,97 +972,142 @@ async function startDetectCritters() {
   }
 }
 
-function stopBatchPolling() {
-  if (batchPollTimer) {
-    window.clearInterval(batchPollTimer);
-    batchPollTimer = null;
-  }
-}
-
-async function pollBatchStatus() {
-  try {
-    const response = await fetch("/api/detect-critters/batch-delete/status");
-    const data = await response.json();
-    if (!data.ok) {
-      throw new Error("Status error");
-    }
-    if (data.status === "idle") {
-      stopBatchPolling();
-      batchDetectInFlight = false;
-      updateBatchButton();
-      return;
-    }
-    const job = data.job;
-    if (!job) {
-      return;
-    }
-    if (job.status === "starting") {
-      setStatus("AI batch delete is starting...");
-    } else if (job.status === "running") {
-      setStatus(
-        `AI batch delete... ${job.processed}/${job.total} | animals ${job.matched} | delete ${job.deleted}`
-      );
-    } else if (job.status === "done") {
-      stopBatchPolling();
-      batchDetectInFlight = false;
-      updateBatchButton();
-      setStatus(
-        `AI batch delete done. Marked ${job.deleted} for delete.`
-      );
-      await fetchItems();
-    } else if (job.status === "error") {
-      stopBatchPolling();
-      batchDetectInFlight = false;
-      updateBatchButton();
-      setStatus("AI batch delete failed. Check server logs.");
-    }
-  } catch {
-    stopBatchPolling();
-    batchDetectInFlight = false;
-    updateBatchButton();
-    setStatus("AI batch status check failed.");
-  }
-}
-
 async function startBatchDelete() {
   if (batchDetectInFlight) {
     return;
   }
   batchDetectInFlight = true;
   updateBatchButton();
-  setStatus("Starting AI batch delete...");
   try {
-    const response = await fetch("/api/detect-critters/batch-delete", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ scope: "unreviewed" }),
-    });
-    const data = await response.json();
-    if (!response.ok || !data.ok) {
+    batchResumePath = currentPath();
+  setStatus("Preparing AI batch detect...");
+    await fetchItems(batchResumePath || undefined);
+    batchQueue = state.library
+      .filter((item) => item.type === "image" && item.critter == null)
+      .map((item) => item.path);
+    if (batchQueue.length === 0) {
       batchDetectInFlight = false;
       updateBatchButton();
-      if (data.error === "missing_key") {
-        setStatus("Set OPENROUTER_API_KEY on the server to enable AI.");
-      } else if (data.error === "job_running") {
-        setStatus("AI batch delete already running.");
-        batchDetectInFlight = true;
-      } else {
-        setStatus("AI batch delete failed to start.");
-      }
-      if (data.error === "job_running") {
-        stopBatchPolling();
-        batchPollTimer = window.setInterval(pollBatchStatus, 1200);
-        pollBatchStatus();
-      }
+    setStatus("No images need AI detection.");
       return;
     }
-    stopBatchPolling();
-    batchPollTimer = window.setInterval(pollBatchStatus, 1200);
-    pollBatchStatus();
+    batchStats = {
+      total: batchQueue.length,
+      processed: 0,
+      animals: 0,
+      deleted: 0,
+      failed: 0,
+    };
+    await runBatchQueue();
   } catch {
     batchDetectInFlight = false;
     updateBatchButton();
-    setStatus("AI batch delete failed to start.");
+    setStatus("AI batch detect failed to start.");
+  }
+}
+
+async function runBatchQueue() {
+  for (let index = 0; index < batchQueue.length; index += 1) {
+    const path = batchQueue[index];
+    batchStats.processed = index + 1;
+    const shown = showLibraryItem(path);
+    if (!shown) {
+      batchStats.failed += 1;
+      continue;
+    }
+    await waitForImageLoad(path);
+    setStatus(
+      `AI batch detect ${batchStats.processed}/${batchStats.total}...`
+    );
+
+    const detectResult = await detectCritterForBatch(path);
+    if (!detectResult.ok) {
+      batchStats.failed += 1;
+      setStatus(
+        `AI batch detect error on ${batchStats.processed}/${batchStats.total}`
+      );
+      continue;
+    }
+
+    const { critter, confidence, model } = detectResult.result;
+    updateLibraryItem(path, {
+      critter,
+      critterConfidence: confidence,
+      critterModel: model || null,
+      critterCheckedAt: new Date().toISOString(),
+    });
+
+    if (critter) {
+      batchStats.animals += 1;
+      await showBatchIndicator("ok");
+    } else {
+      batchStats.deleted += 1;
+      await showBatchIndicator("no");
+      const deleted = await markDeleteForBatch(path);
+      if (deleted) {
+        applyLocalAction(path, "delete");
+      }
+    }
+
+    renderLibrary();
+    setStatus(
+      `AI batch detect ${batchStats.processed}/${batchStats.total} | animals ${batchStats.animals} | delete ${batchStats.deleted}`
+    );
+  }
+
+  batchDetectInFlight = false;
+  updateBatchButton();
+  updateDetectButton(currentItem());
+  setStatus(
+    `AI batch detect done. Marked ${batchStats.deleted} for delete.`
+  );
+  await fetchItems(batchResumePath || undefined);
+}
+
+async function detectCritterForBatch(path) {
+  try {
+    const response = await fetch("/api/detect-critters", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path }),
+    });
+    const data = await response.json();
+    if (!response.ok || !data.ok) {
+      if (data.error === "missing_key") {
+        setStatus("Set OPENROUTER_API_KEY on the server to enable AI.");
+      } else if (data.error === "not_image") {
+        setStatus("AI detection is only available for images.");
+      } else if (data.error === "missing_path") {
+        setStatus("Select an image to detect animals.");
+      } else if (data.error === "no_preview") {
+        setStatus("No preview available to send to AI.");
+      } else if (data.error === "not_found") {
+        setStatus("Image not found.");
+      } else {
+        setStatus("AI detection failed.");
+      }
+      return { ok: false, error: data.error || "detect_failed" };
+    }
+    return { ok: true, result: data.result };
+  } catch {
+    setStatus("AI detection failed.");
+    return { ok: false, error: "detect_failed" };
+  }
+}
+
+async function markDeleteForBatch(path) {
+  try {
+    const response = await fetch("/api/action", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path, action: "delete" }),
+    });
+    if (!response.ok) {
+      return false;
+    }
+    return true;
+  } catch {
+    return false;
   }
 }
 
@@ -1336,7 +1465,6 @@ applyLibraryWidth(getStoredLibraryWidth(), false);
 setLibraryOpen(initialLibraryOpen);
 updateDetectButton(currentItem());
 updateBatchButton();
-pollBatchStatus();
 
 fetchItems().catch(() => {
   setStatus("Failed to load items");

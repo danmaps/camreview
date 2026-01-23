@@ -817,7 +817,7 @@ async function getCritterImageInfo(item) {
   return null;
 }
 
-async function callOpenRouterForCritter(imageInfo, model) {
+async function callOpenRouterForCritter(imageInfo, model, options = {}) {
   const { apiKey, referrer } = getOpenRouterConfig();
   if (!apiKey) {
     return { error: "missing_key" };
@@ -871,6 +871,10 @@ async function callOpenRouterForCritter(imageInfo, model) {
     return { error: "parse_error" };
   }
   const content = data?.choices?.[0]?.message?.content || "";
+  if (options.logResponse) {
+    const context = options.context ? ` (${options.context})` : "";
+    console.log(`OpenRouter response${context}: ${content}`);
+  }
   const parsed = parseCritterResponse(content);
   if (!parsed) {
     return { error: "invalid_response" };
@@ -944,14 +948,30 @@ async function detectCritterForPath(targetPath) {
 }
 
 async function runBatchCritterDeleteJob(jobId, scope) {
-  const scanItems = await scanMedia();
-  const map = await syncMetadata(scanItems);
-  const model = getOpenRouterConfig().model;
-
   if (!batchJob || batchJob.id !== jobId) {
     return;
   }
   batchJob.status = "running";
+  batchJob.phase = "scanning";
+  batchJob.processed = 0;
+  batchJob.matched = 0;
+  batchJob.deleted = 0;
+  batchJob.failed = 0;
+  batchJob.total = 0;
+
+  let scanItems;
+  let map;
+  try {
+    scanItems = await scanMedia();
+    map = await syncMetadata(scanItems);
+  } catch (err) {
+    batchJob.status = "error";
+    batchJob.error = err.message;
+    batchJob.finishedAt = new Date().toISOString();
+    return;
+  }
+
+  const model = getOpenRouterConfig().model;
   batchJob.phase = "detecting";
 
   const candidates = scanItems.filter((item) => {
@@ -988,7 +1008,10 @@ async function runBatchCritterDeleteJob(jobId, scope) {
           meta.critterModel = model;
           batchJob.failed += 1;
         } else {
-          const result = await callOpenRouterForCritter(imageInfo, model);
+          const result = await callOpenRouterForCritter(imageInfo, model, {
+            logResponse: true,
+            context: item.path,
+          });
           if (result.error) {
             meta.critterError = result.error;
             meta.critterCheckedAt = new Date().toISOString();
@@ -1071,7 +1094,7 @@ app.post("/api/detect-critters/batch-delete", async (req, res) => {
   }
 
   const payload = req.body || {};
-  const scope = payload.scope === "all" ? "all" : "unreviewed";
+  const scope = payload.scope === "unreviewed" ? "unreviewed" : "all";
 
   const { apiKey } = getOpenRouterConfig();
   if (!apiKey) {

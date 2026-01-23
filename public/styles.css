@@ -329,6 +329,36 @@ body.resizing {
   z-index: 3;
 }
 
+.batch-indicator {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  opacity: 0;
+  transition: opacity 120ms ease;
+  z-index: 4;
+}
+
+.batch-indicator.show {
+  opacity: 1;
+}
+
+.batch-indicator .batch-icon {
+  width: 96px;
+  height: 96px;
+  display: none;
+}
+
+.batch-indicator.ok .batch-ok {
+  display: block;
+  fill: var(--accent);
+}
+
+.batch-indicator.no .batch-no {
+  display: block;
+  fill: var(--danger);
+}
+
 .nav {
   position: absolute;
   inset: 0;

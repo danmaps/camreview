@@ -54,11 +54,19 @@
               &#x203A;
             </button>
           </div>
-          <div class="overlay">
-            <div class="swipe-label keep" id="swipeKeep">KEEP</div>
-            <div class="swipe-label delete" id="swipeDelete">DELETE</div>
-            <div class="swipe-label favorite" id="swipeFavorite">FAVORITE</div>
+        <div class="overlay">
+          <div class="swipe-label keep" id="swipeKeep">KEEP</div>
+          <div class="swipe-label delete" id="swipeDelete">DELETE</div>
+          <div class="swipe-label favorite" id="swipeFavorite">FAVORITE</div>
+          <div class="batch-indicator" id="batchIndicator" aria-hidden="true">
+            <svg class="batch-icon batch-ok" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <path d="M9.172 16.242 4.93 12l-1.414 1.414 5.656 5.657L20.486 7.757l-1.414-1.414z"/>
+            </svg>
+            <svg class="batch-icon batch-no" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <path d="M18.364 5.636 12 12l6.364 6.364-1.414 1.414L10.586 13.414 4.222 19.778 2.808 18.364 9.172 12 2.808 5.636 4.222 4.222l6.364 6.364 6.364-6.364z"/>
+            </svg>
           </div>
+        </div>
           <div id="emptyState" class="empty hidden">
             <div class="empty-title">Queue cleared</div>
             <div class="empty-subtitle">No unreviewed items remain.</div>
@@ -90,12 +98,12 @@
                 <tr>
                   <th>Type</th>
                   <th>Name</th>
+                  <th>Critter</th>
+                  <th>Conf</th>
+                  <th>Status</th>
                   <th>Folder</th>
                   <th>Captured</th>
                   <th>Size</th>
-                  <th>Status</th>
-                  <th>Critter</th>
-                  <th>Conf</th>
                   <th>Reviewed</th>
                 </tr>
               </thead>
@@ -121,8 +129,8 @@
         <button class="btn ghost" id="refreshBtn">Refresh</button>
         <button class="btn ghost" id="detectBtn">Detect Animals</button>
         <button class="btn ghost btn-stack" id="batchDeleteBtn">
-          <span class="btn-title">AI batch delete</span>
-          <span class="btn-sub">(remove photos without animals)</span>
+          <span class="btn-title">AI batch detect</span>
+          <span class="btn-sub">(mark photos without animals)</span>
         </button>
       </section>
 
