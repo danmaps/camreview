@@ -2,16 +2,31 @@
 
 Fast, local-only review of trail camera media on Windows. No cloud. No Docker. Safe deletes.
 
-## Setup
+## Features
 
-1. Edit `config.json` and set `mediaRoot` to your trailcam folder.
-2. Install dependencies:
+- One-at-a-time review with Keep / Delete / Favorite
+- Swipe gestures and big buttons (mobile-first)
+- Undo last action
+- Safe deletes (moves into `Trash/`)
+- Persistent JSON metadata
+- Video streaming with phone-friendly fallback
+
+## Quick start
+
+1. Copy config:
+
+```bash
+copy config.example.json config.json
+```
+
+2. Edit `config.json` and set `mediaRoot` to your trailcam folder.
+3. Install dependencies:
 
 ```bash
 npm install
 ```
 
-3. Start the server:
+4. Start the server:
 
 ```bash
 npm start
@@ -19,17 +34,24 @@ npm start
 
 The app listens on `http://0.0.0.0:3000`. On your phone, open `http://<your-lan-ip>:3000`.
 
-## What it does
+For auto-reload during development:
 
-- Scans `mediaRoot` recursively (ignores any `Trash` folder).
-- Shows one item at a time for Keep / Delete / Favorite.
-- Swipe right to Keep, left to Delete, up to Favorite (buttons still work).
-- Stores review metadata in `trailcam_review.json`.
-- Deletes are logical until you tap "Apply Deletes".
-- Apply Deletes moves files into `Trash/` under `mediaRoot`.
-- Video previews: if a video cannot play, CamReview looks for a sidecar preview
-  image (`.gif`, `.jpg`, `.jpeg`, `.png`) with the same base name or inside
-  `.camreview/previews/` and shows it instead.
+```bash
+npm run dev
+```
+
+## Controls
+
+- Swipe right = Keep
+- Swipe left = Delete
+- Swipe up = Favorite
+- Buttons always work
+
+## How deletes work
+
+- Delete marks the file only.
+- "Apply Changes" moves delete-marked files into `Trash/` under `mediaRoot`.
+- No permanent deletes in v0.
 
 ## Metadata
 
@@ -43,6 +65,23 @@ The metadata file is `trailcam_review.json` and is SQLite-friendly (flat rows). 
 
 If the metadata file is corrupt, a backup copy is created and a fresh file is used.
 
+## Video behavior
+
+- If a video fails on mobile, CamReview auto-creates a smaller H.264 MP4 on the server
+  (requires `ffmpeg`) and plays that version.
+- Previews are generated at `previewFps` up to `previewMaxFrames`.
+- You can also drop a sidecar preview image (`.gif`, `.jpg`, `.jpeg`, `.png`) with the same
+  base name or inside `.camreview/previews/`.
+
+## Configuration
+
+See `config.example.json`. Options:
+
+- `mediaRoot` (required)
+- `ffmpegPath` (optional, full path to `ffmpeg.exe`)
+- `previewFps` (optional, default 2)
+- `previewMaxFrames` (optional, default 24)
+
 ## API (v0)
 
 - `GET /api/items` -> list unreviewed items
@@ -50,20 +89,10 @@ If the metadata file is corrupt, a backup copy is created and a fresh file is us
 - `POST /api/undo` -> undo last action
 - `POST /api/apply-deletes` -> move delete-marked files to Trash
 - `GET /api/preview-frames?path=...&generate=1` -> list or generate preview frames
+- `POST /api/transcode` -> create phone-friendly H.264 MP4
 - `GET /media?path=...` -> stream image/video
 
-## Notes
+## Troubleshooting
 
-- No permanent deletes in v0.
-- Single-user, local-only.
-- Video streaming supports range requests.
-- If a phone cannot decode some videos, you can drop preview GIFs in
-  `.camreview/previews/<same folders>/<name>.gif` to ensure something displays.
-- If `ffmpeg` is available on your PATH, CamReview will auto-generate a JPG
-  preview the first time a video preview is requested.
-- If `ffmpeg` is installed but not on PATH, set `"ffmpegPath"` in `config.json`
-  to the full `ffmpeg.exe` path.
-- When a video fails on mobile, CamReview will auto-create a smaller
-  H.264 MP4 on the server (requires `ffmpeg`).
-- Use `POST /api/transcode` if you want to create a smaller H.264 MP4 manually.
-- Tune preview density with `previewFps` and `previewMaxFrames` in `config.json`.
+- If `ffmpeg` is installed but not found, set `ffmpegPath` in `config.json`.
+- If mobile video still fails, check the server console output for ffmpeg errors.

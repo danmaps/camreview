@@ -1,0 +1,6 @@
+{
+  "mediaRoot": "C:\\\\trailcam",
+  "ffmpegPath": "C:\\\\ffmpeg\\\\bin\\\\ffmpeg.exe",
+  "previewFps": 2,
+  "previewMaxFrames": 24
+}
