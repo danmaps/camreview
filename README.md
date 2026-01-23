@@ -7,10 +7,14 @@ Fast, local-only review of trail camera media on Windows. No cloud. No Docker. S
 - One-at-a-time review with Keep / Delete / Favorite
 - Swipe gestures and big buttons (mobile-first)
 - Undo last action
+- Arrow-key browsing + on-screen arrows (no decision required)
+- Desktop library drawer with search/filter + critter columns
+- Resizable library pane on desktop
 - Safe deletes (moves into `Trash/`)
 - Favorites move into `Favorites/` on apply
 - Persistent JSON metadata
 - Video streaming with phone-friendly fallback
+- Optional AI critter detection + batch delete marking
 
 ## Quick start
 
@@ -47,6 +51,8 @@ npm run dev
 - Swipe left = Delete
 - Swipe up = Favorite
 - Buttons always work
+- Arrow keys browse the queue
+- K = Keep, D = Delete, F = Favorite
 
 ## How deletes work
 
@@ -64,6 +70,7 @@ The metadata file is `trailcam_review.json` and is SQLite-friendly (flat rows). 
 - `reviewedAt`
 - `caption`
 - `ai` (reserved)
+- `critter`, `critterConfidence`, `critterCheckedAt`, `critterModel`
 
 If the metadata file is corrupt, a backup copy is created and a fresh file is used.
 
@@ -99,6 +106,7 @@ See `config.example.json`. Options:
 - `ffmpegPath` (optional, full path to `ffmpeg.exe`)
 - `previewFps` (optional, default 2)
 - `previewMaxFrames` (optional, default 24)
+- `openrouterModel` (optional, default `openai/gpt-4o-mini`)
 
 ## API (v0)
 
