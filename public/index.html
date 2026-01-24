@@ -47,10 +47,10 @@
             ></video>
           </div>
           <div class="nav">
-            <button class="nav-arrow nav-prev" id="prevBtn" aria-label="Previous">
+            <button class="nav-arrow nav-prev" id="prevBtn" aria-label="Previous" title="Previous (left arrow)">
               &#x2039;
             </button>
-            <button class="nav-arrow nav-next" id="nextBtn" aria-label="Next">
+            <button class="nav-arrow nav-next" id="nextBtn" aria-label="Next" title="Next (right arrow)">
               &#x203A;
             </button>
           </div>
@@ -117,20 +117,26 @@
         <span class="file-name" id="fileName"></span>
       </div>
 
+      <section class="caption">
+        <textarea
+          id="captionInput"
+          rows="2"
+          placeholder="Caption..."
+        ></textarea>
+        <div class="caption-status" id="captionStatus"></div>
+      </section>
+
       <section class="controls">
-        <button class="btn keep" id="keepBtn">Keep</button>
-        <button class="btn favorite" id="favoriteBtn">Favorite</button>
-        <button class="btn delete" id="deleteBtn">Delete</button>
+        <button class="btn keep" id="keepBtn" title="Press K or swipe right">Keep</button>
+        <button class="btn favorite" id="favoriteBtn" title="Press F or swipe up">Favorite</button>
+        <button class="btn delete" id="deleteBtn" title="Press D or swipe left">Delete</button>
       </section>
 
       <section class="secondary">
-        <button class="btn ghost" id="undoBtn">Undo</button>
-        <button class="btn ghost" id="applyBtn">Apply Changes</button>
-        <button class="btn ghost" id="refreshBtn">Refresh</button>
-        <button class="btn ghost" id="detectBtn">Detect Animals</button>
+        <button class="btn ghost" id="undoBtn" title="Undo last action">Undo</button>
         <button class="btn ghost btn-stack" id="batchDeleteBtn">
-          <span class="btn-title">AI batch detect</span>
-          <span class="btn-sub">(mark photos without animals)</span>
+          <span class="btn-title">AI batch: animals only</span>
+          <span class="btn-sub">(moves no-animal photos to Trash + writes captions)</span>
         </button>
       </section>
 

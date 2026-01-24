@@ -7,16 +7,20 @@ const { spawn, spawnSync } = require("child_process");
 const app = express();
 const PORT = 3000;
 
-const CONFIG_PATH = path.join(__dirname, "config.json");
-const DATA_PATH = path.join(__dirname, "trailcam_review.json");
-const OPENROUTER_ENDPOINT = "https://openrouter.ai/api/v1/chat/completions";
+const CONFIG_PATH =
+  process.env.CAMREVIEW_CONFIG_PATH || path.join(__dirname, "config.json");
+const DATA_PATH =
+  process.env.CAMREVIEW_DATA_PATH || path.join(__dirname, "trailcam_review.json");
+const OPENROUTER_ENDPOINT =
+  process.env.OPENROUTER_ENDPOINT ||
+  "https://openrouter.ai/api/v1/chat/completions";
 
 const SUPPORTED_EXTENSIONS = new Set([".jpg", ".jpeg", ".png", ".mp4", ".mov"]);
 const PREVIEW_EXTENSIONS = [".gif", ".jpg", ".jpeg", ".png"];
 
 let mediaRoot = null;
 let mediaRootLower = null;
-let metadata = { schemaVersion: 1, items: [] };
+let metadata = { schemaVersion: 1, sessionDate: null, items: [] };
 let undoStack = [];
 const previewJobs = new Map();
 const transcodeJobs = new Map();
@@ -92,6 +96,7 @@ function mergeWithMetadata(scanItems, map) {
       ...item,
       status: meta?.status || "unreviewed",
       reviewedAt: meta?.reviewedAt ?? null,
+      caption: meta?.caption || "",
       critter: meta?.critter ?? null,
       critterConfidence: meta?.critterConfidence ?? null,
       critterCheckedAt: meta?.critterCheckedAt ?? null,
@@ -454,20 +459,24 @@ async function loadMetadata() {
       throw new Error("Invalid metadata shape");
     }
     metadata = parsed;
+    if (!Object.prototype.hasOwnProperty.call(metadata, "sessionDate")) {
+      metadata.sessionDate = null;
+      await saveMetadata();
+    }
   } catch (err) {
     if (err.code === "ENOENT") {
-      metadata = { schemaVersion: 1, items: [] };
+      metadata = { schemaVersion: 1, sessionDate: null, items: [] };
       await saveMetadata();
       return;
     }
     const backupName = `trailcam_review.json.corrupt-${Date.now()}`;
-    const backupPath = path.join(__dirname, backupName);
+    const backupPath = path.join(path.dirname(DATA_PATH), backupName);
     try {
       await fsp.copyFile(DATA_PATH, backupPath);
     } catch (copyErr) {
       console.error("Failed to backup corrupt metadata:", copyErr.message);
     }
-    metadata = { schemaVersion: 1, items: [] };
+    metadata = { schemaVersion: 1, sessionDate: null, items: [] };
     await saveMetadata();
   }
 }
@@ -475,6 +484,22 @@ async function loadMetadata() {
 async function saveMetadata() {
   const payload = JSON.stringify(metadata, null, 2);
   await fsp.writeFile(DATA_PATH, payload, "utf8");
+}
+
+function formatSessionDate(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function ensureSessionDate() {
+  if (metadata.sessionDate) {
+    return metadata.sessionDate;
+  }
+  const stamp = formatSessionDate(new Date());
+  metadata.sessionDate = stamp;
+  return stamp;
 }
 
 async function walkDir(dirPath, items) {
@@ -543,24 +568,24 @@ async function scanMedia() {
   return items;
 }
 
-async function moveItemsToTrash(items, results) {
+async function moveItemsToFolder(items, folderName, results, keys) {
   if (!Array.isArray(items) || items.length === 0) {
     return;
   }
 
-  const trashRoot = path.join(mediaRoot, "Trash");
-  await fsp.mkdir(trashRoot, { recursive: true });
+  const rootPath = path.join(mediaRoot, folderName);
+  await fsp.mkdir(rootPath, { recursive: true });
 
   for (const item of items) {
     if (!item || !item.path) {
       continue;
     }
-    if (item.path.toLowerCase().startsWith("trash/")) {
+    if (item.path.toLowerCase().startsWith(`${folderName.toLowerCase()}/`)) {
       continue;
     }
     const srcPath = relPathToFs(item.path);
     if (!isUnderRoot(srcPath)) {
-      results.errors.push({ path: item.path, error: "Invalid path" });
+      results[keys.errors].push({ path: item.path, error: "Invalid path" });
       continue;
     }
     try {
@@ -568,11 +593,12 @@ async function moveItemsToTrash(items, results) {
     } catch {
       item.missing = true;
       item.missingAt = new Date().toISOString();
-      results.missing.push(item.path);
+      results[keys.missing].push(item.path);
       continue;
     }
 
-    const destRel = path.posix.join("Trash", item.path);
+    const basePath = item.originalPath || item.path;
+    const destRel = path.posix.join(folderName, basePath);
     const destPath = relPathToFs(destRel);
     const destDir = path.dirname(destPath);
     await fsp.mkdir(destDir, { recursive: true });
@@ -584,10 +610,56 @@ async function moveItemsToTrash(items, results) {
       }
       item.path = destRel;
       item.movedAt = new Date().toISOString();
-      results.moved.push(destRel);
-      console.log(`Moved to Trash: ${destRel}`);
+      results[keys.moved].push(destRel);
+      console.log(`Moved to ${folderName}: ${destRel}`);
     } catch (err) {
-      results.errors.push({ path: item.path, error: err.message });
+      results[keys.errors].push({ path: item.path, error: err.message });
+    }
+  }
+}
+
+async function moveItemToPath(item, destRel, results, keys) {
+  if (!item || !item.path || !destRel) {
+    return;
+  }
+  const srcPath = relPathToFs(item.path);
+  if (!isUnderRoot(srcPath)) {
+    if (results && keys) {
+      results[keys.errors].push({ path: item.path, error: "Invalid path" });
+    }
+    return;
+  }
+  const destPath = relPathToFs(destRel);
+  if (!isUnderRoot(destPath)) {
+    if (results && keys) {
+      results[keys.errors].push({ path: destRel, error: "Invalid path" });
+    }
+    return;
+  }
+
+  try {
+    await fsp.access(srcPath, fs.constants.F_OK);
+  } catch {
+    item.missing = true;
+    item.missingAt = new Date().toISOString();
+    if (results && keys) {
+      results[keys.missing].push(item.path);
+    }
+    return;
+  }
+
+  const destDir = path.dirname(destPath);
+  await fsp.mkdir(destDir, { recursive: true });
+  try {
+    await fsp.rename(srcPath, destPath);
+    item.path = normalizeRelPath(destRel);
+    item.movedAt = new Date().toISOString();
+    if (results && keys) {
+      results[keys.moved].push(item.path);
+    }
+  } catch (err) {
+    if (results && keys) {
+      results[keys.errors].push({ path: item.path, error: err.message });
     }
   }
 }
@@ -619,6 +691,10 @@ async function syncMetadata(scanItems) {
       }
       if (!Object.prototype.hasOwnProperty.call(existing, "reviewedAt")) {
         existing.reviewedAt = null;
+        changed = true;
+      }
+      if (!Object.prototype.hasOwnProperty.call(existing, "caption")) {
+        existing.caption = "";
         changed = true;
       }
       if (!Object.prototype.hasOwnProperty.call(existing, "critter")) {
@@ -703,11 +779,14 @@ function postJson(urlString, headers, payload) {
   return new Promise((resolve, reject) => {
     const urlObj = new URL(urlString);
     const data = JSON.stringify(payload);
+    const isHttp = urlObj.protocol === "http:";
+    const transport = isHttp ? require("http") : require("https");
+    const defaultPort = isHttp ? 80 : 443;
     const options = {
       method: "POST",
       hostname: urlObj.hostname,
       path: urlObj.pathname,
-      port: urlObj.port || 443,
+      port: urlObj.port || defaultPort,
       headers: {
         "Content-Type": "application/json",
         "Content-Length": Buffer.byteLength(data),
@@ -715,7 +794,7 @@ function postJson(urlString, headers, payload) {
       },
     };
 
-    const req = require("https").request(options, (res) => {
+    const req = transport.request(options, (res) => {
       let body = "";
       res.on("data", (chunk) => (body += chunk.toString("utf8")));
       res.on("end", () => {
@@ -880,6 +959,67 @@ async function callOpenRouterForCritter(imageInfo, model, options = {}) {
     return { error: "invalid_response" };
   }
   return { ...parsed };
+}
+
+async function callOpenRouterForCaption(imageInfo, model) {
+  const { apiKey, referrer } = getOpenRouterConfig();
+  if (!apiKey) {
+    return { error: "missing_key" };
+  }
+  const ext = path.extname(imageInfo.fsPath).toLowerCase();
+  const mime = getContentType(ext);
+  const buffer = await fsp.readFile(imageInfo.fsPath);
+  const base64 = buffer.toString("base64");
+  const imageUrl = `data:${mime};base64,${base64}`;
+
+  const payload = {
+    model,
+    temperature: 0.7,
+    max_tokens: 160,
+    messages: [
+      {
+        role: "system",
+        content:
+          "You write short, whimsical captions. Output plain text only (no quotes, no hashtags).",
+      },
+      {
+        role: "user",
+        content: [
+          {
+            type: "text",
+            text:
+              "Write 2-3 sentences about what's happening in the image. Focus on animals and action; avoid describing the environment unless it's obvious. You can mention time/season if it feels right. No camera references.",
+          },
+          {
+            type: "image_url",
+            image_url: { url: imageUrl },
+          },
+        ],
+      },
+    ],
+  };
+
+  const headers = {
+    Authorization: `Bearer ${apiKey}`,
+    "HTTP-Referer": referrer,
+    "X-Title": "CamReview",
+  };
+
+  const response = await postJson(OPENROUTER_ENDPOINT, headers, payload);
+  if (response.status < 200 || response.status >= 300) {
+    return { error: `openrouter_${response.status}` };
+  }
+  let data;
+  try {
+    data = JSON.parse(response.body);
+  } catch {
+    return { error: "parse_error" };
+  }
+  const content = (data?.choices?.[0]?.message?.content || "").trim();
+  if (!content) {
+    return { error: "invalid_response" };
+  }
+  return { caption: content };
 }
 
 async function detectCritterForPath(targetPath) {
@@ -1087,6 +1227,84 @@ app.post("/api/detect-critters", async (req, res) => {
   }
 });
 
+app.post("/api/caption", async (req, res) => {
+  const payload = req.body || {};
+  const relPath = payload.path ? normalizeRelPath(payload.path) : "";
+  const caption =
+    typeof payload.caption === "string" ? payload.caption : "";
+  if (!relPath) {
+    res.status(400).json({ ok: false, error: "missing_path" });
+    return;
+  }
+  if (caption.length > 1000) {
+    res.status(400).json({ ok: false, error: "caption_too_long" });
+    return;
+  }
+
+  const scanItems = await scanMedia();
+  const map = await syncMetadata(scanItems);
+  const entry = map.get(relPath);
+  if (!entry) {
+    res.status(404).json({ ok: false, error: "not_found" });
+    return;
+  }
+
+  entry.caption = caption;
+  metadata.items = Array.from(map.values());
+  await saveMetadata();
+  res.json({ ok: true, caption: entry.caption });
+});
+
+app.post("/api/caption/generate", async (req, res) => {
+  const payload = req.body || {};
+  const relPath = payload.path ? normalizeRelPath(payload.path) : "";
+  if (!relPath) {
+    res.status(400).json({ ok: false, error: "missing_path" });
+    return;
+  }
+  const { apiKey } = getOpenRouterConfig();
+  if (!apiKey) {
+    res.status(400).json({ ok: false, error: "missing_key" });
+    return;
+  }
+
+  const scanItems = await scanMedia();
+  const map = await syncMetadata(scanItems);
+  const item = scanItems.find((entry) => entry.path === relPath);
+  if (!item) {
+    res.status(404).json({ ok: false, error: "not_found" });
+    return;
+  }
+  if (item.type !== "image") {
+    res.status(400).json({ ok: false, error: "not_image" });
+    return;
+  }
+
+  const imageInfo = await getCritterImageInfo(item);
+  if (!imageInfo) {
+    res.status(500).json({ ok: false, error: "no_preview" });
+    return;
+  }
+
+  const model = getOpenRouterConfig().model;
+  const result = await callOpenRouterForCaption(imageInfo, model);
+  if (result.error) {
+    res.status(502).json({ ok: false, error: result.error });
+    return;
+  }
+
+  const entry = map.get(relPath);
+  if (!entry) {
+    res.status(404).json({ ok: false, error: "not_found" });
+    return;
+  }
+  entry.caption = result.caption;
+  metadata.items = Array.from(map.values());
+  await saveMetadata();
+
+  res.json({ ok: true, caption: result.caption, model });
+});
+
 app.post("/api/detect-critters/batch-delete", async (req, res) => {
   if (batchJob && batchJob.status === "running") {
     res.status(409).json({ ok: false, error: "job_running", job: batchJob });
@@ -1151,19 +1369,63 @@ app.post("/api/action", async (req, res) => {
     return;
   }
 
-  undoStack.push({
-    path: normalizedPath,
-    prevStatus: entry.status,
-    prevReviewedAt: entry.reviewedAt ?? null,
+  const prevStatus = entry.status;
+  const prevReviewedAt = entry.reviewedAt ?? null;
+  const prevFavoritedAt = entry.favoritedAt ?? null;
+  const prevPath = normalizedPath;
+  const sessionDate = ensureSessionDate();
+  const folderName =
+    action === "delete"
+      ? `Trash_${sessionDate}`
+      : action === "favorite"
+      ? `Favorites_${sessionDate}`
+      : `Keep_${sessionDate}`;
+  const moveResults = { moved: [], missing: [], errors: [] };
+  await moveItemsToFolder([entry], folderName, moveResults, {
+    moved: "moved",
+    missing: "missing",
+    errors: "errors",
   });
 
+  if (moveResults.errors.length > 0) {
+    entry.status = prevStatus;
+    entry.reviewedAt = prevReviewedAt;
+    entry.favoritedAt = prevFavoritedAt;
+    metadata.items = Array.from(map.values());
+    await saveMetadata();
+    res.status(500).json({ ok: false, error: "move_failed" });
+    return;
+  }
+
+  const now = new Date().toISOString();
   entry.status = action;
-  entry.reviewedAt = new Date().toISOString();
+  entry.reviewedAt = now;
+  if (action === "favorite") {
+    entry.favoritedAt = now;
+  } else if (Object.prototype.hasOwnProperty.call(entry, "favoritedAt")) {
+    entry.favoritedAt = null;
+  }
+
+  undoStack.push({
+    prevPath,
+    nextPath: entry.path,
+    prevStatus,
+    prevReviewedAt,
+    prevFavoritedAt,
+  });
 
   metadata.items = Array.from(map.values());
   await saveMetadata();
 
-  res.json({ ok: true });
+  res.json({
+    ok: true,
+    prevPath,
+    path: entry.path,
+    status: entry.status,
+    reviewedAt: entry.reviewedAt,
+    favoritedAt: entry.favoritedAt ?? null,
+    missing: moveResults.missing.length > 0,
+  });
 });
 
 app.post("/api/undo", async (req, res) => {
@@ -1174,92 +1436,37 @@ app.post("/api/undo", async (req, res) => {
   }
 
   const map = buildMetadataMap();
-  const entry = map.get(last.path);
+  const entry = map.get(last.nextPath) || map.get(last.prevPath);
   if (!entry) {
+    undoStack.push(last);
     res.json({ ok: false });
     return;
   }
 
+  if (entry.path !== last.prevPath) {
+    const moveResults = { moved: [], missing: [], errors: [] };
+    await moveItemToPath(entry, last.prevPath, moveResults, {
+      moved: "moved",
+      missing: "missing",
+      errors: "errors",
+    });
+    if (moveResults.errors.length > 0) {
+      undoStack.push(last);
+      res.status(500).json({ ok: false, error: "undo_move_failed" });
+      return;
+    }
+  }
+
   entry.status = last.prevStatus || "unreviewed";
   entry.reviewedAt = last.prevReviewedAt ?? null;
-
-  metadata.items = Array.from(map.values());
-  await saveMetadata();
-
-  res.json({ ok: true, path: last.path });
-});
-
-app.post("/api/apply-deletes", async (req, res) => {
-  const map = buildMetadataMap();
-  const deleteItems = metadata.items.filter(
-    (item) => item.status === "delete"
-  );
-  const favoriteItems = metadata.items.filter(
-    (item) => item.status === "favorite"
-  );
-  const results = {
-    moved: [],
-    missing: [],
-    errors: [],
-    favoritesMoved: [],
-    favoritesMissing: [],
-    favoritesErrors: [],
-  };
-
-  if (deleteItems.length === 0 && favoriteItems.length === 0) {
-    res.json({ ok: true, ...results });
-    return;
-  }
-
-  await moveItemsToTrash(deleteItems, results);
-
-  if (favoriteItems.length > 0) {
-    const favoritesRoot = path.join(mediaRoot, "Favorites");
-    await fsp.mkdir(favoritesRoot, { recursive: true });
-  }
-
-  for (const item of favoriteItems) {
-    const lower = item.path.toLowerCase();
-    if (lower.startsWith("favorites/") || lower.startsWith("trash/")) {
-      continue;
-    }
-    const srcPath = relPathToFs(item.path);
-    if (!isUnderRoot(srcPath)) {
-      results.favoritesErrors.push({ path: item.path, error: "Invalid path" });
-      continue;
-    }
-    try {
-      await fsp.access(srcPath, fs.constants.F_OK);
-    } catch {
-      item.missing = true;
-      item.missingAt = new Date().toISOString();
-      results.favoritesMissing.push(item.path);
-      continue;
-    }
-
-    const destRel = path.posix.join("Favorites", item.path);
-    const destPath = relPathToFs(destRel);
-    const destDir = path.dirname(destPath);
-    await fsp.mkdir(destDir, { recursive: true });
-
-    try {
-      await fsp.rename(srcPath, destPath);
-      if (!item.originalPath) {
-        item.originalPath = item.path;
-      }
-      item.path = destRel;
-      item.favoritedAt = new Date().toISOString();
-      results.favoritesMoved.push(destRel);
-      console.log(`Moved to Favorites: ${destRel}`);
-    } catch (err) {
-      results.favoritesErrors.push({ path: item.path, error: err.message });
-    }
+  if (Object.prototype.hasOwnProperty.call(entry, "favoritedAt")) {
+    entry.favoritedAt = last.prevFavoritedAt ?? null;
   }
 
   metadata.items = Array.from(map.values());
   await saveMetadata();
 
-  res.json({ ok: true, ...results });
+  res.json({ ok: true, path: entry.path });
 });
 
 app.post("/api/transcode", async (req, res) => {
@@ -1412,11 +1619,15 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: "Server error" });
 });
 
+async function initialize() {
+  await loadConfig();
+  await loadMetadata();
+  await fsp.mkdir(mediaRoot, { recursive: true });
+}
+
 async function start() {
   try {
-    await loadConfig();
-    await loadMetadata();
-    await fsp.mkdir(mediaRoot, { recursive: true });
+    await initialize();
     app.listen(PORT, "0.0.0.0", () => {
       console.log(`CamReview running on http://0.0.0.0:${PORT}`);
     });
@@ -1426,4 +1637,8 @@ async function start() {
   }
 }
 
-start();
+if (require.main === module) {
+  start();
+}
+
+module.exports = { app, initialize };

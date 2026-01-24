@@ -9,12 +9,14 @@ Fast, local-only review of trail camera media on Windows. No cloud. No Docker. S
 - Undo last action
 - Arrow-key browsing + on-screen arrows (no decision required)
 - Desktop library drawer with search/filter + critter columns
+- Desktop-only batch detect with live per-image feedback
 - Resizable library pane on desktop
-- Safe deletes (moves into `Trash/`)
-- Favorites move into `Favorites/` on apply
+- Safe deletes (moves into dated `Trash_YYYY-MM-DD/`)
+- Favorites, Keeps, and Deletes move into dated folders immediately
 - Persistent JSON metadata
 - Video streaming with phone-friendly fallback
-- Optional AI critter detection + batch delete marking
+- Optional AI batch critter detection (desktop)
+- Optional AI captions with editable text
 
 ## Quick start
 
@@ -54,23 +56,45 @@ npm run dev
 - Arrow keys browse the queue
 - K = Keep, D = Delete, F = Favorite
 
+## Desktop vs mobile
+
+- Desktop view is power-user mode: library drawer, resizable pane, batch detect,
+  full keyboard shortcuts, and hover hints.
+- Mobile view is streamlined: big buttons + swipes, minimal chrome, and no batch
+  detect to keep it fast and thumb-friendly.
+- Desktop plays the original MP4 with sound. Mobile uses a lighter preview
+  stream when playback is flaky, so it may look choppier but stays reliable.
+- Both views share the same review queue, metadata, and safe delete behavior.
+
+## Non-goals
+
+- No filename changes or renaming.
+- No permanent deletes (everything is a move you can undo in Explorer).
+- No auto-organized albums or collections.
+- No cloud sync, accounts, or multi-user features.
+- No editing, filters, or color adjustments.
+
 ## How deletes work
 
-- Delete marks the file only.
-- "Apply Changes" moves delete-marked files into `Trash/` under `mediaRoot`.
-- "Apply Changes" moves favorite-marked files into `Favorites/` under `mediaRoot`.
+- Delete moves files immediately into `Trash_YYYY-MM-DD` under `mediaRoot`.
+- Favorite moves files immediately into `Favorites_YYYY-MM-DD` under `mediaRoot`.
+- Keep moves files immediately into `Keep_YYYY-MM-DD` under `mediaRoot`.
 - No permanent deletes in v0.
 
 ## Metadata
 
 The metadata file is `trailcam_review.json` and is SQLite-friendly (flat rows). It stores:
 
+- `sessionDate`
 - `path`
 - `status`
 - `reviewedAt`
 - `caption`
 - `ai` (reserved)
 - `critter`, `critterConfidence`, `critterCheckedAt`, `critterModel`
+
+`sessionDate` is created automatically on the first review action and is used for
+the dated folder names.
 
 If the metadata file is corrupt, a backup copy is created and a fresh file is used.
 
@@ -84,12 +108,11 @@ If the metadata file is corrupt, a backup copy is created and a fresh file is us
 
 ## AI critter detection (optional)
 
-CamReview can call OpenRouter to detect animals. This is opt-in and sends the current
-image to the OpenRouter model only when you click **Detect Animals** (images only).
-If a result already exists, CamReview reuses the cached value.
+CamReview can call OpenRouter in batch mode (desktop only). It runs through images
+without critter data, moves no-animal photos into Trash immediately, and writes
+captions for the animal photos.
 
-You can also run **AI batch detect** to detect animals across all images and
-mark non-animal photos for delete (Apply Changes still controls the move to `Trash/`).
+Captions are always editable inline after generation.
 
 Requirements:
 
@@ -111,15 +134,25 @@ See `config.example.json`. Options:
 ## API (v0)
 
 - `GET /api/items` -> list unreviewed items
-- `POST /api/action` -> mark keep/delete/favorite
+- `POST /api/action` -> keep/delete/favorite and move immediately
 - `POST /api/undo` -> undo last action
-- `POST /api/apply-deletes` -> move delete-marked files to Trash, favorites to Favorites
 - `GET /api/preview-frames?path=...&generate=1` -> list or generate preview frames
 - `POST /api/transcode` -> create phone-friendly H.264 MP4
 - `GET /media?path=...` -> stream image/video
 - `POST /api/detect-critters` -> detect animal presence for the current image
-- `POST /api/detect-critters/batch-delete` -> batch detect + mark non-animal images for delete
-- `GET /api/detect-critters/batch-delete/status` -> poll batch job status
+- `POST /api/caption` -> save a caption for a file
+- `POST /api/caption/generate` -> generate a caption for the current image
+
+## Tests
+
+API tests run against a temporary copy of a few sample files from your
+`C:\Users\danny\iCloudDrive\trailcam` folder (originals are never modified).
+
+Run:
+
+```bash
+npm test
+```
 
 ## Troubleshooting
 

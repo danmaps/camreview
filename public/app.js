@@ -18,6 +18,8 @@ const elements = {
   fileInfo: document.getElementById("fileInfo"),
   fileName: document.getElementById("fileName"),
   status: document.getElementById("status"),
+  captionInput: document.getElementById("captionInput"),
+  captionStatus: document.getElementById("captionStatus"),
   keepBtn: document.getElementById("keepBtn"),
   deleteBtn: document.getElementById("deleteBtn"),
   favoriteBtn: document.getElementById("favoriteBtn"),
@@ -26,9 +28,6 @@ const elements = {
   swipeFavorite: document.getElementById("swipeFavorite"),
   batchIndicator: document.getElementById("batchIndicator"),
   undoBtn: document.getElementById("undoBtn"),
-  applyBtn: document.getElementById("applyBtn"),
-  refreshBtn: document.getElementById("refreshBtn"),
-  detectBtn: document.getElementById("detectBtn"),
   batchDeleteBtn: document.getElementById("batchDeleteBtn"),
   prevBtn: document.getElementById("prevBtn"),
   nextBtn: document.getElementById("nextBtn"),
@@ -51,6 +50,8 @@ const deviceInfo = {
   isTouch:
     (window.matchMedia && window.matchMedia("(pointer: coarse)").matches) ||
     navigator.maxTouchPoints > 0,
+  isDesktop:
+    window.matchMedia && window.matchMedia("(min-width: 900px)").matches,
 };
 
 let actionInFlight = false;
@@ -65,12 +66,15 @@ const transcodeMap = new Map();
 let previewFrames = [];
 let previewFrameIndex = 0;
 let previewTimer = null;
-let detectInFlight = false;
 let batchDetectInFlight = false;
 let batchIndicatorTimer = null;
 let batchQueue = [];
 let batchStats = null;
 let batchResumePath = "";
+let captionSaveTimer = null;
+let captionSavePath = "";
+let lastCaptionPath = "";
+let captionStatusTimer = null;
 const swipeState = {
   pointerId: null,
   startX: 0,
@@ -95,6 +99,64 @@ function setFileName(value) {
     return;
   }
   elements.fileName.textContent = value || "";
+}
+
+function setCaptionText(value) {
+  if (!elements.captionInput) {
+    return;
+  }
+  elements.captionInput.value = value || "";
+}
+
+function setCaptionStatus(message, kind) {
+  if (!elements.captionStatus) {
+    return;
+  }
+  elements.captionStatus.textContent = message || "";
+  elements.captionStatus.classList.remove("ok", "error");
+  if (kind === "ok") {
+    elements.captionStatus.classList.add("ok");
+  } else if (kind === "error") {
+    elements.captionStatus.classList.add("error");
+  }
+  if (captionStatusTimer) {
+    window.clearTimeout(captionStatusTimer);
+    captionStatusTimer = null;
+  }
+  if (message) {
+    captionStatusTimer = window.setTimeout(() => {
+      setCaptionStatus("", "");
+    }, 1400);
+  }
+}
+
+function updateCaptionUI(item) {
+  if (!elements.captionInput) {
+    return;
+  }
+  const isImage = item && item.type === "image";
+  const disable = !isImage || batchDetectInFlight;
+  elements.captionInput.disabled = disable;
+  if (disable) {
+    setCaptionStatus("", "");
+  }
+}
+
+function updateCaptionLocal(path, caption) {
+  const queueIndex = findQueueIndexByPath(path);
+  if (queueIndex >= 0) {
+    state.items.splice(queueIndex, 1, {
+      ...state.items[queueIndex],
+      caption,
+    });
+  }
+  const libraryIndex = findLibraryIndexByPath(path);
+  if (libraryIndex >= 0) {
+    state.library.splice(libraryIndex, 1, {
+      ...state.library[libraryIndex],
+      caption,
+    });
+  }
 }
 
 function clamp(value, min, max) {
@@ -149,27 +211,72 @@ function updateProgress() {
   }
 }
 
-function updateDetectButton(item) {
-  if (!elements.detectBtn) {
-    return;
-  }
-  const isImage = item && item.type === "image";
-  elements.detectBtn.disabled = !isImage || detectInFlight || batchDetectInFlight;
-  elements.detectBtn.textContent = detectInFlight
-    ? "Detecting..."
-    : "Detect Animals";
-  if (!isImage) {
-    elements.detectBtn.title = "Detect Animals is available for images only.";
-  } else {
-    elements.detectBtn.title = "";
-  }
-}
-
 function updateBatchButton() {
   if (!elements.batchDeleteBtn) {
     return;
   }
-  elements.batchDeleteBtn.disabled = batchDetectInFlight || detectInFlight;
+  if (!deviceInfo.isDesktop) {
+    elements.batchDeleteBtn.disabled = true;
+    elements.batchDeleteBtn.title = "Batch detect is available on desktop only.";
+    return;
+  }
+  elements.batchDeleteBtn.disabled = batchDetectInFlight;
+  elements.batchDeleteBtn.title = "";
+}
+
+function flushCaptionSave() {
+  if (!captionSaveTimer) {
+    return;
+  }
+  window.clearTimeout(captionSaveTimer);
+  captionSaveTimer = null;
+  if (captionSavePath) {
+    saveCaption(captionSavePath, elements.captionInput?.value || "");
+  }
+}
+
+function scheduleCaptionSave() {
+  if (!elements.captionInput) {
+    return;
+  }
+  const item = currentItem();
+  if (!item || item.type !== "image") {
+    return;
+  }
+  captionSavePath = item.path;
+  setCaptionStatus("Saving...", "");
+  if (captionSaveTimer) {
+    window.clearTimeout(captionSaveTimer);
+  }
+  captionSaveTimer = window.setTimeout(() => {
+    captionSaveTimer = null;
+    saveCaption(captionSavePath, elements.captionInput.value || "");
+  }, 700);
+}
+
+async function saveCaption(path, caption) {
+  try {
+    const response = await fetch("/api/caption", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path, caption }),
+    });
+    const data = await response.json();
+    if (!response.ok || !data.ok) {
+      if (currentItem() && currentItem().path === path) {
+        setCaptionStatus("Save failed", "error");
+      }
+      return;
+    }
+    updateCaptionLocal(path, data.caption || "");
+    if (currentItem() && currentItem().path === path) {
+      setCaptionStatus("Saved", "ok");
+    }
+  } catch {
+    if (currentItem() && currentItem().path === path) {
+      setCaptionStatus("Save failed", "error");
+    }
+  }
 }
 
 function updateNavButtons() {
@@ -408,7 +515,16 @@ function updateLibraryItem(path, updates) {
   state.library.splice(idx, 1, { ...state.library[idx], ...updates });
 }
 
-function applyLocalAction(path, action) {
+function getFolderFromPath(relPath) {
+  if (!relPath) {
+    return ".";
+  }
+  const idx = relPath.lastIndexOf("/");
+  return idx >= 0 ? relPath.slice(0, idx) : ".";
+}
+
+function applyLocalAction(path, action, nextPath, reviewedAt, favoritedAt) {
+  const finalPath = nextPath || path;
   const queueIndex = findQueueIndexByPath(path);
   if (queueIndex >= 0) {
     state.items.splice(queueIndex, 1);
@@ -425,13 +541,24 @@ function applyLocalAction(path, action) {
     }
   }
 
-  const libraryIndex = findLibraryIndexByPath(path);
+  let libraryIndex = findLibraryIndexByPath(path);
+  if (libraryIndex < 0 && finalPath !== path) {
+    libraryIndex = findLibraryIndexByPath(finalPath);
+  }
   if (libraryIndex >= 0) {
+    const timestamp = reviewedAt || new Date().toISOString();
     const updated = {
       ...state.library[libraryIndex],
+      path: finalPath,
+      folder: getFolderFromPath(finalPath),
       status: action,
-      reviewedAt: new Date().toISOString(),
+      reviewedAt: timestamp,
     };
+    if (action === "favorite") {
+      updated.favoritedAt = favoritedAt || timestamp;
+    } else if (Object.prototype.hasOwnProperty.call(updated, "favoritedAt")) {
+      updated.favoritedAt = null;
+    }
     state.library.splice(libraryIndex, 1, updated);
     if (state.viewMode === "library" && state.libraryIndex === libraryIndex) {
       state.libraryIndex = libraryIndex;
@@ -764,16 +891,24 @@ function render() {
   updateProgress();
   updateNavButtons();
   const item = currentItem();
+  const nextPath = item ? item.path : "";
+  if (lastCaptionPath && lastCaptionPath !== nextPath) {
+    flushCaptionSave();
+  }
+  lastCaptionPath = nextPath;
   if (!item) {
     showEmpty();
     updateActiveRow();
-    updateDetectButton(null);
+    setCaptionText("");
+    setCaptionStatus("", "");
+    updateCaptionUI(null);
     return;
   }
   resetSwipeUI();
   showMedia(item);
   updateActiveRow();
-  updateDetectButton(item);
+  setCaptionText(item.caption || "");
+  updateCaptionUI(item);
 }
 
 function selectLibraryPath(path) {
@@ -847,12 +982,19 @@ async function sendAction(action) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ path: item.path, action }),
     });
-    if (!response.ok) {
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || !data.ok) {
       setStatus("Action failed");
       resetSwipeUI();
       return;
     }
-    applyLocalAction(item.path, action);
+    applyLocalAction(
+      data.prevPath || item.path,
+      action,
+      data.path || item.path,
+      data.reviewedAt || null,
+      data.favoritedAt || null
+    );
     setStatus("");
     renderLibrary();
     render();
@@ -864,120 +1006,25 @@ async function sendAction(action) {
 async function undoLast() {
   setStatus("Undoing...");
   const response = await fetch("/api/undo", { method: "POST" });
-  const data = await response.json();
-  if (!data.ok) {
-    setStatus("Nothing to undo");
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || !data.ok) {
+    setStatus(response.ok ? "Nothing to undo" : "Undo failed");
     return;
   }
   await fetchItems(data.path);
-}
-
-async function applyDeletes() {
-  setStatus("Applying changes...");
-  const response = await fetch("/api/apply-deletes", { method: "POST" });
-  const data = await response.json();
-  if (!data.ok) {
-    setStatus("Apply failed");
-    return;
-  }
-  const movedTrash = Array.isArray(data.moved) ? data.moved.length : 0;
-  const movedFavorites = Array.isArray(data.favoritesMoved)
-    ? data.favoritesMoved.length
-    : 0;
-  const parts = [];
-  if (movedTrash) {
-    parts.push(`Trash: ${movedTrash}`);
-  }
-  if (movedFavorites) {
-    parts.push(`Favorites: ${movedFavorites}`);
-  }
-  if (parts.length === 0) {
-    setStatus("No changes to apply");
-  } else {
-    setStatus(`Moved ${parts.join(" | ")}`);
-  }
-  await fetchItems();
-}
-
-async function startDetectCritters() {
-  if (detectInFlight) {
-    return;
-  }
-  if (batchDetectInFlight) {
-    setStatus("AI batch delete is running.");
-    return;
-  }
-  detectInFlight = true;
-  updateDetectButton(currentItem());
-  setStatus("Starting AI detection...");
-  try {
-    const item = currentItem();
-    if (!item || item.type !== "image") {
-      detectInFlight = false;
-      updateDetectButton(item || null);
-      setStatus("Select an image to detect animals.");
-      return;
-    }
-    const response = await fetch("/api/detect-critters", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ path: item.path }),
-    });
-    const data = await response.json();
-    if (!response.ok || !data.ok) {
-      detectInFlight = false;
-      updateDetectButton(item);
-      if (data.error === "missing_key") {
-        setStatus("Set OPENROUTER_API_KEY on the server to enable AI.");
-      } else if (data.error === "not_image") {
-        setStatus("AI detection is only available for images.");
-      } else if (data.error === "missing_path") {
-        setStatus("Select an image to detect animals.");
-      } else if (data.error === "job_running") {
-        setStatus("AI detection already running.");
-      } else if (data.error === "no_preview") {
-        setStatus("No preview available to send to AI.");
-      } else if (data.error === "not_found") {
-        setStatus("Image not found.");
-      } else {
-        setStatus("AI detection failed.");
-      }
-      return;
-    }
-
-    const result = data.result;
-    if (result && typeof result.critter === "boolean") {
-      const modelLabel = result.model || "AI";
-      const confidence = formatConfidence(result.confidence);
-      if (result.critter) {
-        setStatus(
-          `${modelLabel} is ${confidence} sure you're seeing an animal!`
-        );
-      } else {
-        setStatus(
-          `${modelLabel} is ${confidence} sure this is not an animal.`
-        );
-      }
-    } else {
-      setStatus("AI detection complete.");
-    }
-
-    detectInFlight = false;
-    updateDetectButton(currentItem());
-    await fetchItems(currentPath());
-  } catch {
-    detectInFlight = false;
-    updateDetectButton(currentItem());
-    setStatus("AI detection failed.");
-  }
 }
 
 async function startBatchDelete() {
   if (batchDetectInFlight) {
     return;
   }
+  if (!deviceInfo.isDesktop) {
+    setStatus("AI batch detect is available on desktop only.");
+    return;
+  }
   batchDetectInFlight = true;
   updateBatchButton();
+  updateCaptionUI(currentItem());
   try {
     batchResumePath = currentPath();
   setStatus("Preparing AI batch detect...");
@@ -988,7 +1035,8 @@ async function startBatchDelete() {
     if (batchQueue.length === 0) {
       batchDetectInFlight = false;
       updateBatchButton();
-    setStatus("No images need AI detection.");
+      updateCaptionUI(currentItem());
+      setStatus("No images need AI detection.");
       return;
     }
     batchStats = {
@@ -1002,6 +1050,7 @@ async function startBatchDelete() {
   } catch {
     batchDetectInFlight = false;
     updateBatchButton();
+    updateCaptionUI(currentItem());
     setStatus("AI batch detect failed to start.");
   }
 }
@@ -1039,28 +1088,34 @@ async function runBatchQueue() {
 
     if (critter) {
       batchStats.animals += 1;
+      if (!state.library.find((entry) => entry.path === path)?.caption) {
+        await generateCaptionForBatch(path);
+      }
       await showBatchIndicator("ok");
     } else {
       batchStats.deleted += 1;
       await showBatchIndicator("no");
       const deleted = await markDeleteForBatch(path);
-      if (deleted) {
-        applyLocalAction(path, "delete");
+      if (deleted.ok) {
+        applyLocalAction(
+          deleted.prevPath,
+          "delete",
+          deleted.nextPath,
+          deleted.reviewedAt
+        );
       }
     }
 
     renderLibrary();
     setStatus(
-      `AI batch detect ${batchStats.processed}/${batchStats.total} | animals ${batchStats.animals} | delete ${batchStats.deleted}`
+      `AI batch detect ${batchStats.processed}/${batchStats.total} | animals ${batchStats.animals} | trash ${batchStats.deleted}`
     );
   }
 
   batchDetectInFlight = false;
   updateBatchButton();
-  updateDetectButton(currentItem());
-  setStatus(
-    `AI batch detect done. Marked ${batchStats.deleted} for delete.`
-  );
+  updateCaptionUI(currentItem());
+  setStatus(`AI batch detect done. Moved ${batchStats.deleted} to Trash.`);
   await fetchItems(batchResumePath || undefined);
 }
 
@@ -1102,12 +1157,40 @@ async function markDeleteForBatch(path) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ path, action: "delete" }),
     });
-    if (!response.ok) {
-      return false;
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || !data.ok) {
+      return { ok: false };
     }
-    return true;
+    return {
+      ok: true,
+      prevPath: data.prevPath || path,
+      nextPath: data.path || path,
+      reviewedAt: data.reviewedAt || null,
+    };
   } catch {
-    return false;
+    return { ok: false };
+  }
+}
+
+async function generateCaptionForBatch(path) {
+  try {
+    const response = await fetch("/api/caption/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path }),
+    });
+    const data = await response.json();
+    if (!response.ok || !data.ok) {
+      return;
+    }
+    const caption = data.caption || "";
+    updateCaptionLocal(path, caption);
+    if (currentItem() && currentItem().path === path) {
+      setCaptionText(caption);
+      setCaptionStatus("Saved", "ok");
+    }
+  } catch {
+    // ignore caption generation errors in batch
   }
 }
 
@@ -1115,13 +1198,12 @@ elements.keepBtn.addEventListener("click", () => sendAction("keep"));
 elements.deleteBtn.addEventListener("click", () => sendAction("delete"));
 elements.favoriteBtn.addEventListener("click", () => sendAction("favorite"));
 elements.undoBtn.addEventListener("click", undoLast);
-elements.applyBtn.addEventListener("click", applyDeletes);
-elements.refreshBtn.addEventListener("click", () => fetchItems());
-if (elements.detectBtn) {
-  elements.detectBtn.addEventListener("click", startDetectCritters);
-}
 if (elements.batchDeleteBtn) {
   elements.batchDeleteBtn.addEventListener("click", startBatchDelete);
+}
+if (elements.captionInput) {
+  elements.captionInput.addEventListener("input", scheduleCaptionSave);
+  elements.captionInput.addEventListener("blur", flushCaptionSave);
 }
 elements.prevBtn.addEventListener("click", () => moveIndex(-1));
 elements.nextBtn.addEventListener("click", () => moveIndex(1));
@@ -1463,7 +1545,6 @@ try {
 }
 applyLibraryWidth(getStoredLibraryWidth(), false);
 setLibraryOpen(initialLibraryOpen);
-updateDetectButton(currentItem());
 updateBatchButton();
 
 fetchItems().catch(() => {
