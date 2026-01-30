@@ -156,9 +156,17 @@ body.route-browse .page-chip {
 
 .menu-btn {
   min-width: 44px;
-  padding: 6px 12px;
-  font-size: 16px;
+  height: 36px;
+  padding: 0 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
   line-height: 1;
+  background: rgba(110, 231, 183, 0.95);
+  border-color: rgba(110, 231, 183, 1);
+  color: #0f141b;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
 }
 
 .browse-panel {
