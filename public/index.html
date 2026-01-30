@@ -19,10 +19,21 @@
             <button class="topbar-btn" id="navBrowse" type="button">Browse</button>
             <button class="topbar-btn" id="navReview" type="button">Review</button>
           </nav>
+
           <div class="progress" id="progressText">0 / 0</div>
-          <button class="topbar-btn" id="libraryToggle" type="button">
-            List
-          </button>
+
+          <button class="topbar-btn" id="libraryToggle" type="button">List</button>
+
+          <div class="menu">
+            <button class="topbar-btn menu-btn" id="menuBtn" type="button" aria-label="Menu" aria-expanded="false">
+              ☰
+            </button>
+            <div class="menu-pop" id="menuPop" role="menu" aria-hidden="true">
+              <button class="menu-item" id="menuBrowse" type="button" role="menuitem">Browse</button>
+              <button class="menu-item" id="menuReview" type="button" role="menuitem">Review</button>
+              <button class="menu-item" id="menuToggleList" type="button" role="menuitem">Toggle list</button>
+            </div>
+          </div>
         </div>
       </header>
 
