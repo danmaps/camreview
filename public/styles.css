@@ -257,30 +257,35 @@ body.route-browse .page-chip {
   .topbar {
     flex-wrap: nowrap;
     gap: 10px;
+    padding-left: 56px; /* reserve space for pinned menu */
   }
 
   /* Pin the hamburger to the left, always visible */
   .menu {
     display: block;
-    flex: 0 0 auto;
+    position: absolute;
+    left: 12px;
+    top: 10px;
+    z-index: 80;
   }
 
   .menu-btn {
     position: relative;
-    z-index: 60;
+    z-index: 90;
   }
 
   .progress {
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    max-width: 52vw;
+    max-width: 44vw;
   }
 
   .topbar-right {
     flex-wrap: nowrap;
     justify-content: flex-end;
     gap: 8px;
+    min-width: 0;
   }
 
   .topbar-btn {
