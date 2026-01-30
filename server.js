@@ -43,10 +43,27 @@ app.get("/", (req, res) => {
 
 // SPA routes
 app.get(["/browse", "/review"], (req, res) => {
+  // iOS Safari can be aggressive about caching HTML; keep this fresh during dev.
+  res.setHeader("Cache-Control", "no-store");
   res.sendFile(path.join(PUBLIC_DIR, "index.html"));
 });
 
-app.use(express.static(PUBLIC_DIR));
+app.use(
+  express.static(PUBLIC_DIR, {
+    etag: false,
+    lastModified: false,
+    setHeaders: (res, filePath) => {
+      const lower = String(filePath).toLowerCase();
+      if (
+        lower.endsWith(".html") ||
+        lower.endsWith(".js") ||
+        lower.endsWith(".css")
+      ) {
+        res.setHeader("Cache-Control", "no-store");
+      }
+    },
+  })
+);
 
 function normalizeRelPath(relPath) {
   return relPath.split(path.sep).join("/");
