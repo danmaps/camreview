@@ -162,16 +162,20 @@ body.route-browse .page-chip {
 .menu-btn {
   min-width: 44px;
   height: 36px;
-  padding: 0 12px;
+  padding: 0 10px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   font-size: 16px;
   line-height: 1;
-  background: rgba(110, 231, 183, 0.95);
-  border-color: rgba(110, 231, 183, 1);
-  color: #0f141b;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.14);
+  color: var(--text);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.25);
+}
+
+.menu-btn:hover {
+  background: rgba(255, 255, 255, 0.12);
 }
 
 .menu-icon {
@@ -264,15 +268,15 @@ body.route-browse .page-chip {
   .topbar {
     flex-wrap: nowrap;
     gap: 10px;
-    padding-left: 56px; /* reserve space for pinned menu */
+    padding-left: calc(56px + env(safe-area-inset-left, 0px)); /* reserve space for pinned menu */
   }
 
   /* Pin the hamburger to the left, always visible */
   .menu {
     display: block;
     position: absolute;
-    left: 12px;
-    top: 10px;
+    left: calc(12px + env(safe-area-inset-left, 0px));
+    top: calc(10px + env(safe-area-inset-top, 0px));
     z-index: 80;
   }
 
