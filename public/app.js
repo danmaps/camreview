@@ -1431,7 +1431,21 @@ function applyRoute(route) {
     if (elements.browsePanel) {
       elements.browsePanel.setAttribute("aria-hidden", "false");
     }
+
+    // Make sure you're not staring at an empty panel: default to latest day.
+    if (!browseDayKey && state.library.length > 0) {
+      const latest = [...state.library]
+        .filter((item) => Number.isFinite(item.capturedAtMs ?? item.mtimeMs))
+        .sort((a, b) => (a.capturedAtMs ?? a.mtimeMs) - (b.capturedAtMs ?? b.mtimeMs))
+        .at(-1);
+      if (latest) {
+        const ms = latest.capturedAtMs ?? latest.mtimeMs;
+        browseDayKey = formatDayKey(ms);
+      }
+    }
+
     renderHeatmap();
+    renderLibrary();
   } else {
     if (elements.libraryToggle) {
       elements.libraryToggle.disabled = false;

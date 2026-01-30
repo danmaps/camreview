@@ -23,9 +23,11 @@ body.route-browse .library-resizer {
 body.route-browse #libraryPanel {
   flex: 1;
   width: 100%;
+  max-width: none;
 }
 
+/* In Browse, the library is the page content; never hide it. */
+body.route-browse #libraryPanel,
 body.route-browse #libraryPanel.collapsed {
   display: block;
-  max-width: none;
 }

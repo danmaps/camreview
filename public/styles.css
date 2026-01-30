@@ -168,16 +168,33 @@ body.resizing {
 }
 
 @media (max-width: 720px) {
+  .topbar {
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+
+  .topbar-right {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 8px;
+  }
+
+  .topbar-btn {
+    padding: 6px 10px;
+  }
+
   /* Mobile: GitHub-style grid (weeks columns, 7 rows); horizontal scroll */
   .heatmap-grid {
-    grid-template-columns: repeat(26, 14px);
+    grid-template-columns: none;
     grid-auto-flow: column;
+    grid-auto-columns: 14px;
     grid-template-rows: repeat(7, 14px);
     width: 100%;
     overflow-x: auto;
     padding-bottom: 6px;
     scrollbar-width: thin;
   }
+
   .heatmap-cell {
     width: 14px;
     height: 14px;
