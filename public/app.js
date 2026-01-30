@@ -31,6 +31,8 @@ const elements = {
   batchDeleteBtn: document.getElementById("batchDeleteBtn"),
   prevBtn: document.getElementById("prevBtn"),
   nextBtn: document.getElementById("nextBtn"),
+  navBrowse: document.getElementById("navBrowse"),
+  navReview: document.getElementById("navReview"),
   libraryToggle: document.getElementById("libraryToggle"),
   libraryPanel: document.getElementById("libraryPanel"),
   libraryResizer: document.getElementById("libraryResizer"),
@@ -38,6 +40,10 @@ const elements = {
   libraryFilter: document.getElementById("libraryFilter"),
   libraryBody: document.getElementById("libraryBody"),
   libraryMeta: document.getElementById("libraryMeta"),
+  browsePanel: document.getElementById("browsePanel"),
+  heatmapMeta: document.getElementById("heatmapMeta"),
+  heatmapGrid: document.getElementById("heatmapGrid"),
+  hourBar: document.getElementById("hourBar"),
 };
 
 const preload = {
@@ -387,6 +393,36 @@ function updateActiveRow() {
 }
 
 
+function formatDayKey(ms) {
+  const d = new Date(ms);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function getHour(ms) {
+  return new Date(ms).getHours();
+}
+
+function applyBrowseFilters(items) {
+  if (currentRoute !== "browse") {
+    return items;
+  }
+  let out = items;
+  if (browseDayKey) {
+    out = out.filter((item) => {
+      const ms = item.capturedAtMs ?? item.mtimeMs;
+      if (!Number.isFinite(ms)) {
+        return false;
+      }
+      return formatDayKey(ms) === browseDayKey;
+    });
+  }
+  // Hour selection is informational / navigation; do not hard-filter unless we want it later.
+  return out;
+}
+
 function renderLibrary() {
   if (!elements.libraryBody) {
     return;
@@ -395,7 +431,7 @@ function renderLibrary() {
     .trim()
     .toLowerCase();
   const filter = elements.libraryFilter?.value || "all";
-  const allItems = state.library;
+  const allItems = applyBrowseFilters(state.library);
   const filtered = allItems.filter((item) => {
     if (filter !== "all" && item.status !== filter) {
       return false;
@@ -467,6 +503,14 @@ function renderLibrary() {
 const libraryStorageKey = "camreview_library_open";
 const libraryWidthKey = "camreview_library_width";
 const libraryWidthBounds = { min: 260, max: 640, default: 360 };
+
+const routeStorageKey = "camreview_route";
+const lastPathStorageKey = "camreview_last_path";
+let currentRoute = "review";
+
+// Browse filters / selection
+let browseDayKey = ""; // YYYY-MM-DD
+let browseHour = null; // 0-23
 
 function setLibraryOpen(open) {
   if (!elements.libraryPanel) {
@@ -887,6 +931,160 @@ function preloadNext() {
   }
 }
 
+function renderHeatmap() {
+  if (!elements.heatmapGrid || !elements.hourBar) {
+    return;
+  }
+
+  // Build day totals (for desktop day grid and mobile GH grid)
+  const dayMap = new Map(); // dayKey -> { total, hours[24] }
+  for (const item of state.library) {
+    const ms = item.capturedAtMs ?? item.mtimeMs;
+    if (!Number.isFinite(ms)) {
+      continue;
+    }
+    const dayKey = formatDayKey(ms);
+    const hour = getHour(ms);
+    if (!dayMap.has(dayKey)) {
+      dayMap.set(dayKey, { total: 0, hours: Array(24).fill(0) });
+    }
+    const rec = dayMap.get(dayKey);
+    rec.total += 1;
+    rec.hours[hour] += 1;
+  }
+
+  const allDays = Array.from(dayMap.keys()).sort();
+  if (allDays.length === 0) {
+    elements.heatmapGrid.replaceChildren();
+    elements.hourBar.replaceChildren();
+    if (elements.heatmapMeta) {
+      elements.heatmapMeta.textContent = "No captures";
+    }
+    return;
+  }
+
+  // Choose a window (last 60 days) for now.
+  const DAYS = 60;
+  const latest = new Date(allDays[allDays.length - 1] + "T00:00:00");
+  const start = new Date(latest);
+  start.setDate(start.getDate() - (DAYS - 1));
+
+  const dayKeys = [];
+  for (let i = 0; i < DAYS; i += 1) {
+    const d = new Date(start);
+    d.setDate(start.getDate() + i);
+    dayKeys.push(formatDayKey(d.getTime()));
+  }
+
+  // Determine levels similar to GH (0-4) based on non-zero distribution.
+  const totals = dayKeys.map((k) => dayMap.get(k)?.total || 0);
+  const max = Math.max(...totals);
+  const thresholds = max > 0 ? [1, Math.ceil(max * 0.25), Math.ceil(max * 0.5), Math.ceil(max * 0.75)] : [1, 2, 3, 4];
+  function levelForCount(count) {
+    if (!count) return 0;
+    if (count <= thresholds[0]) return 1;
+    if (count <= thresholds[1]) return 2;
+    if (count <= thresholds[2]) return 3;
+    return 4;
+  }
+
+  // Render grid
+  const fragment = document.createDocumentFragment();
+  const isMobile = window.matchMedia && window.matchMedia("(max-width: 720px)").matches;
+
+  if (isMobile) {
+    // GH style: weeks columns, 7 rows (Sun-Sat)
+    // Start on Sunday for alignment
+    const first = new Date(dayKeys[0] + "T00:00:00");
+    const pad = first.getDay(); // 0=Sun
+    const padded = Array(pad).fill(null).concat(dayKeys);
+
+    padded.forEach((dayKey) => {
+      const count = dayKey ? (dayMap.get(dayKey)?.total || 0) : 0;
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "heatmap-cell";
+      btn.dataset.level = String(levelForCount(count));
+      if (dayKey) {
+        btn.dataset.day = dayKey;
+        btn.title = `${dayKey}: ${count} captures`;
+        btn.classList.toggle("selected", dayKey === browseDayKey);
+        btn.addEventListener("click", () => {
+          browseDayKey = dayKey;
+          browseHour = null;
+          renderHeatmap();
+          renderLibrary();
+        });
+      } else {
+        btn.disabled = true;
+        btn.style.visibility = "hidden";
+      }
+      fragment.appendChild(btn);
+    });
+  } else {
+    dayKeys.forEach((dayKey) => {
+      const count = dayMap.get(dayKey)?.total || 0;
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "heatmap-cell";
+      btn.dataset.level = String(levelForCount(count));
+      btn.dataset.day = dayKey;
+      btn.title = `${dayKey}: ${count} captures`;
+      btn.classList.toggle("selected", dayKey === browseDayKey);
+      btn.addEventListener("click", () => {
+        // Desktop spec: clicking selects the whole day.
+        browseDayKey = dayKey;
+        browseHour = null;
+        renderHeatmap();
+        renderLibrary();
+      });
+      fragment.appendChild(btn);
+    });
+  }
+
+  elements.heatmapGrid.replaceChildren(fragment);
+
+  // Render hour bar for selected day (desktop + mobile)
+  const selected = browseDayKey || dayKeys[dayKeys.length - 1];
+  if (!browseDayKey) {
+    browseDayKey = selected;
+  }
+  const hours = dayMap.get(selected)?.hours || Array(24).fill(0);
+  const hourMax = Math.max(...hours, 1);
+  const hourFrag = document.createDocumentFragment();
+  for (let h = 0; h < 24; h += 1) {
+    const val = hours[h] || 0;
+    const bar = document.createElement("div");
+    bar.className = "hourbar-bar";
+    bar.style.height = `${Math.max(6, Math.round((val / hourMax) * 56))}px`;
+    bar.title = `${selected} ${String(h).padStart(2, "0")}:00 — ${val} captures`;
+    bar.classList.toggle("selected", browseHour === h);
+    bar.addEventListener("click", () => {
+      browseHour = h;
+      // Keep day filter; jump to the first item in that hour.
+      const candidates = state.library
+        .filter((item) => {
+          const ms = item.capturedAtMs ?? item.mtimeMs;
+          return Number.isFinite(ms) && formatDayKey(ms) === selected && getHour(ms) === h;
+        })
+        .sort((a, b) => (a.capturedAtMs ?? a.mtimeMs) - (b.capturedAtMs ?? b.mtimeMs));
+      if (candidates.length > 0) {
+        // Clicking a bar opens review at that item.
+        navigateTo("/review", { path: candidates[0].path });
+        return;
+      }
+      renderHeatmap();
+    });
+    hourFrag.appendChild(bar);
+  }
+  elements.hourBar.replaceChildren(hourFrag);
+
+  if (elements.heatmapMeta) {
+    const shownTotal = (dayMap.get(selected)?.total || 0);
+    elements.heatmapMeta.textContent = `${selected} · ${shownTotal} captures`;
+  }
+}
+
 function render() {
   updateProgress();
   updateNavButtons();
@@ -916,6 +1114,13 @@ function selectLibraryPath(path) {
   if (libraryIndex < 0) {
     return;
   }
+
+  // Browse page behavior: clicking a row opens Review at that item.
+  if (currentRoute === "browse") {
+    navigateTo("/review", { path });
+    return;
+  }
+
   const item = state.library[libraryIndex];
   if (item && item.status === "unreviewed") {
     const queueIndex = findQueueIndexByPath(path);
@@ -966,6 +1171,7 @@ async function fetchItems(selectPath) {
   }
   setStatus("");
   renderLibrary();
+  renderHeatmap();
   render();
 }
 
@@ -1192,6 +1398,93 @@ async function generateCaptionForBatch(path) {
   } catch {
     // ignore caption generation errors in batch
   }
+}
+
+function getRouteFromLocation() {
+  const path = window.location.pathname || "/";
+  if (path.startsWith("/browse")) {
+    return "browse";
+  }
+  return "review";
+}
+
+function setActiveNav(route) {
+  if (elements.navBrowse) {
+    elements.navBrowse.classList.toggle("active", route === "browse");
+  }
+  if (elements.navReview) {
+    elements.navReview.classList.toggle("active", route === "review");
+  }
+}
+
+function applyRoute(route) {
+  currentRoute = route;
+  document.body.classList.toggle("route-browse", route === "browse");
+  setActiveNav(route);
+
+  if (route === "browse") {
+    // Browse is library-first; keep it open.
+    setLibraryOpen(true);
+    if (elements.libraryToggle) {
+      elements.libraryToggle.disabled = true;
+    }
+    if (elements.browsePanel) {
+      elements.browsePanel.setAttribute("aria-hidden", "false");
+    }
+    renderHeatmap();
+  } else {
+    if (elements.libraryToggle) {
+      elements.libraryToggle.disabled = false;
+    }
+    if (elements.browsePanel) {
+      elements.browsePanel.setAttribute("aria-hidden", "true");
+    }
+  }
+
+  try {
+    localStorage.setItem(routeStorageKey, route);
+  } catch {
+    // ignore
+  }
+}
+
+function navigateTo(pathname, options = {}) {
+  const url = new URL(window.location.href);
+  url.pathname = pathname;
+
+  if (options.path) {
+    url.searchParams.set("path", options.path);
+    try {
+      localStorage.setItem(lastPathStorageKey, options.path);
+    } catch {
+      // ignore
+    }
+  }
+
+  window.history.pushState({ path: options.path || null }, "", url);
+  handleRouteChange();
+}
+
+function handleRouteChange() {
+  const route = getRouteFromLocation();
+  applyRoute(route);
+
+  const url = new URL(window.location.href);
+  const targetPath = url.searchParams.get("path") || "";
+
+  if (route === "review") {
+    if (targetPath) {
+      // Ensure both lists are loaded before selecting.
+      fetchItems(targetPath).catch(() => {
+        setStatus("Failed to load items");
+      });
+      return;
+    }
+  }
+
+  // No special selection; just re-render.
+  render();
+  renderLibrary();
 }
 
 elements.keepBtn.addEventListener("click", () => sendAction("keep"));
@@ -1547,6 +1840,63 @@ applyLibraryWidth(getStoredLibraryWidth(), false);
 setLibraryOpen(initialLibraryOpen);
 updateBatchButton();
 
-fetchItems().catch(() => {
-  setStatus("Failed to load items");
+function getInitialRoute() {
+  // If the server sent us /browse or /review, respect it. Otherwise fall back to stored route.
+  const fromUrl = getRouteFromLocation();
+  if (window.location.pathname && window.location.pathname !== "/") {
+    return fromUrl;
+  }
+  try {
+    const stored = localStorage.getItem(routeStorageKey);
+    if (stored === "browse" || stored === "review") {
+      return stored;
+    }
+  } catch {
+    // ignore
+  }
+  return "browse";
+}
+
+// Nav buttons
+if (elements.navBrowse) {
+  elements.navBrowse.addEventListener("click", () => {
+    navigateTo("/browse");
+  });
+}
+if (elements.navReview) {
+  elements.navReview.addEventListener("click", () => {
+    const url = new URL(window.location.href);
+    const existingPath = url.searchParams.get("path") || currentPath();
+    navigateTo("/review", { path: existingPath || undefined });
+  });
+}
+
+window.addEventListener("popstate", () => {
+  handleRouteChange();
 });
+
+// Initial load
+(async function init() {
+  const initialRoute = getInitialRoute();
+  applyRoute(initialRoute);
+
+  let initialPath = "";
+  try {
+    initialPath = localStorage.getItem(lastPathStorageKey) || "";
+  } catch {
+    initialPath = "";
+  }
+
+  const url = new URL(window.location.href);
+  const urlPath = url.searchParams.get("path") || "";
+  const targetPath = urlPath || initialPath;
+
+  try {
+    await fetchItems(targetPath || undefined);
+  } catch {
+    setStatus("Failed to load items");
+  }
+
+  // Ensure route CSS is applied after we have content.
+  handleRouteChange();
+})();

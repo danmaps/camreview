@@ -8,18 +8,34 @@
     />
     <title>CamReview</title>
     <link rel="stylesheet" href="styles.css" />
+    <link rel="stylesheet" href="route.css" />
   </head>
   <body>
     <div class="app">
       <header class="topbar">
         <div class="brand">CamReview</div>
         <div class="topbar-right">
+          <nav class="topnav" aria-label="Pages">
+            <button class="topbar-btn" id="navBrowse" type="button">Browse</button>
+            <button class="topbar-btn" id="navReview" type="button">Review</button>
+          </nav>
           <div class="progress" id="progressText">0 / 0</div>
           <button class="topbar-btn" id="libraryToggle" type="button">
             List
           </button>
         </div>
       </header>
+
+      <div class="browse-panel" id="browsePanel" aria-hidden="true">
+        <section class="heatmap" aria-label="Capture heat map">
+          <div class="heatmap-header">
+            <div class="heatmap-title">Timeline</div>
+            <div class="heatmap-meta" id="heatmapMeta"></div>
+          </div>
+          <div class="heatmap-grid" id="heatmapGrid" role="grid" aria-label="Daily capture grid"></div>
+          <div class="hourbar" id="hourBar" aria-label="Hourly capture bar"></div>
+        </section>
+      </div>
 
       <div class="content">
         <main class="viewer" id="viewer">
