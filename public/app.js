@@ -31,9 +31,8 @@ const elements = {
   batchDeleteBtn: document.getElementById("batchDeleteBtn"),
   prevBtn: document.getElementById("prevBtn"),
   nextBtn: document.getElementById("nextBtn"),
-  navBrowse: document.getElementById("navBrowse"),
-  navReview: document.getElementById("navReview"),
   libraryToggle: document.getElementById("libraryToggle"),
+  pageChip: document.getElementById("pageChip"),
   libraryPanel: document.getElementById("libraryPanel"),
   libraryResizer: document.getElementById("libraryResizer"),
   librarySearch: document.getElementById("librarySearch"),
@@ -1414,11 +1413,10 @@ function getRouteFromLocation() {
 }
 
 function setActiveNav(route) {
-  if (elements.navBrowse) {
-    elements.navBrowse.classList.toggle("active", route === "browse");
-  }
-  if (elements.navReview) {
-    elements.navReview.classList.toggle("active", route === "review");
+  // Unified hamburger nav (no top-level buttons), but we still track state.
+  if (elements.pageChip) {
+    elements.pageChip.textContent = route === "browse" ? "Browse" : "Review";
+    elements.pageChip.setAttribute("aria-hidden", "false");
   }
 }
 
@@ -1905,21 +1903,7 @@ function closeMenu() {
   setMenuOpen(false);
 }
 
-// Nav buttons (desktop)
-if (elements.navBrowse) {
-  elements.navBrowse.addEventListener("click", () => {
-    navigateTo("/browse");
-  });
-}
-if (elements.navReview) {
-  elements.navReview.addEventListener("click", () => {
-    const url = new URL(window.location.href);
-    const existingPath = url.searchParams.get("path") || currentPath();
-    navigateTo("/review", { path: existingPath || undefined });
-  });
-}
-
-// Hamburger menu (mobile)
+// Hamburger menu (all)
 if (elements.menuBtn) {
   elements.menuBtn.addEventListener("click", () => {
     toggleMenu();

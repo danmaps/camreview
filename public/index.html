@@ -13,17 +13,7 @@
   <body>
     <div class="app">
       <header class="topbar">
-        <div class="brand">CamReview</div>
-        <div class="topbar-right">
-          <nav class="topnav" aria-label="Pages">
-            <button class="topbar-btn" id="navBrowse" type="button">Browse</button>
-            <button class="topbar-btn" id="navReview" type="button">Review</button>
-          </nav>
-
-          <div class="progress" id="progressText">0 / 0</div>
-
-          <button class="topbar-btn" id="libraryToggle" type="button">List</button>
-
+        <div class="topbar-left">
           <div class="menu">
             <button class="topbar-btn menu-btn" id="menuBtn" type="button" aria-label="Menu" aria-expanded="false">
               ☰
@@ -34,6 +24,13 @@
               <button class="menu-item" id="menuToggleList" type="button" role="menuitem">Toggle list</button>
             </div>
           </div>
+          <div class="brand">CamReview</div>
+          <div class="page-chip" id="pageChip" aria-hidden="true"></div>
+        </div>
+        <div class="topbar-right">
+          <div class="progress" id="progressText">0 / 0</div>
+
+          <button class="topbar-btn" id="libraryToggle" type="button">List</button>
         </div>
       </header>
 
