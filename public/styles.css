@@ -60,6 +60,7 @@ body.resizing {
   text-transform: uppercase;
   letter-spacing: 0.08em;
   font-size: 12px;
+  position: relative;
 }
 
 .topbar-left {
@@ -67,6 +68,7 @@ body.resizing {
   align-items: center;
   gap: 10px;
   min-width: 0;
+  flex: 0 0 auto;
 }
 
 .page-chip {
@@ -105,6 +107,9 @@ body.route-browse .page-chip {
   display: flex;
   align-items: center;
   gap: 12px;
+  flex: 1 1 auto;
+  justify-content: flex-end;
+  min-width: 0;
 }
 
 .topnav {
@@ -248,20 +253,34 @@ body.route-browse .page-chip {
 }
 
 @media (max-width: 720px) {
+  /* Keep header one-line so the menu can't get pushed off-screen */
   .topbar {
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
     gap: 10px;
   }
 
-  .topbar-right {
-    flex-wrap: wrap;
-    justify-content: flex-end;
-    gap: 8px;
-  }
-
-  /* Mobile: hamburger menu */
+  /* Pin the hamburger to the left, always visible */
   .menu {
     display: block;
+    flex: 0 0 auto;
+  }
+
+  .menu-btn {
+    position: relative;
+    z-index: 60;
+  }
+
+  .progress {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 52vw;
+  }
+
+  .topbar-right {
+    flex-wrap: nowrap;
+    justify-content: flex-end;
+    gap: 8px;
   }
 
   .topbar-btn {
