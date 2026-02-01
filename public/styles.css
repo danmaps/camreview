@@ -60,6 +60,36 @@ body.resizing {
   text-transform: uppercase;
   letter-spacing: 0.08em;
   font-size: 12px;
+  position: relative;
+}
+
+.topbar-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  flex: 0 0 auto;
+}
+
+.page-chip {
+  display: none;
+  padding: 4px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+body:not(.route-browse) .page-chip {
+  display: inline-flex;
+}
+
+body.route-browse .page-chip {
+  display: inline-flex;
 }
 
 .brand {
@@ -77,6 +107,221 @@ body.resizing {
   display: flex;
   align-items: center;
   gap: 12px;
+  flex: 1 1 auto;
+  justify-content: flex-end;
+  min-width: 0;
+}
+
+.topnav {
+  display: flex;
+  gap: 8px;
+}
+
+.topbar-btn.active {
+  background: rgba(255, 255, 255, 0.14);
+  border-color: rgba(255, 255, 255, 0.25);
+}
+
+.menu {
+  position: relative;
+  display: block;
+}
+
+.menu-pop {
+  position: absolute;
+  left: 0;
+  right: auto;
+  top: calc(100% + 8px);
+  min-width: 180px;
+  max-width: calc(100vw - 24px);
+  border-radius: 12px;
+  background: rgba(26, 34, 48, 0.98);
+  border: 1px solid var(--border);
+  box-shadow: 0 16px 50px rgba(0, 0, 0, 0.45);
+  padding: 6px;
+  z-index: 100;
+}
+
+.menu-pop[aria-hidden="true"] {
+  display: none;
+}
+
+.menu-item {
+  width: 100%;
+  text-align: left;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text);
+  border-radius: 10px;
+  padding: 10px 10px;
+  font-size: 13px;
+}
+
+.menu-item:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.menu-btn {
+  min-width: 44px;
+  height: 36px;
+  padding: 0 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  line-height: 1;
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.14);
+  color: var(--text);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.25);
+}
+
+.menu-btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.menu-icon {
+  width: 18px;
+  height: 18px;
+  display: block;
+  fill: currentColor;
+}
+
+.browse-panel {
+  display: none;
+  border-radius: 12px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  padding: 10px 12px;
+}
+
+.heatmap-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.heatmap-title {
+  font-weight: 800;
+  text-transform: none;
+  letter-spacing: 0.02em;
+  font-size: 13px;
+}
+
+.heatmap-meta {
+  color: var(--muted);
+  font-size: 12px;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.heatmap-grid {
+  display: grid;
+  grid-template-columns: repeat(30, 1fr);
+  gap: 4px;
+  align-items: stretch;
+}
+
+.heatmap-cell {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.06);
+  cursor: pointer;
+}
+
+.heatmap-cell[data-level="0"] { background: rgba(255, 255, 255, 0.05); }
+.heatmap-cell[data-level="1"] { background: rgba(110, 231, 183, 0.22); }
+.heatmap-cell[data-level="2"] { background: rgba(110, 231, 183, 0.38); }
+.heatmap-cell[data-level="3"] { background: rgba(110, 231, 183, 0.56); }
+.heatmap-cell[data-level="4"] { background: rgba(110, 231, 183, 0.78); }
+
+.heatmap-cell.selected {
+  outline: 2px solid rgba(110, 231, 183, 0.9);
+  outline-offset: 1px;
+}
+
+.hourbar {
+  margin-top: 10px;
+  display: grid;
+  grid-template-columns: repeat(24, 1fr);
+  gap: 3px;
+  align-items: end;
+  min-height: 56px;
+}
+
+.hourbar-bar {
+  width: 100%;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.14);
+  height: 6px;
+  cursor: pointer;
+}
+
+.hourbar-bar.selected {
+  background: rgba(110, 231, 183, 0.85);
+}
+
+@media (max-width: 720px) {
+  /* Keep header one-line so the menu can't get pushed off-screen */
+  .topbar {
+    flex-wrap: nowrap;
+    gap: 10px;
+    padding-left: calc(56px + env(safe-area-inset-left, 0px)); /* reserve space for pinned menu */
+  }
+
+  /* Pin the hamburger to the left, always visible */
+  .menu {
+    display: block;
+    position: absolute;
+    left: calc(12px + env(safe-area-inset-left, 0px));
+    top: calc(10px + env(safe-area-inset-top, 0px));
+    z-index: 120;
+  }
+
+  .menu-btn {
+    position: relative;
+    z-index: 90;
+  }
+
+  .progress {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 44vw;
+  }
+
+  .topbar-right {
+    flex-wrap: nowrap;
+    justify-content: flex-end;
+    gap: 8px;
+    min-width: 0;
+  }
+
+  .topbar-btn {
+    padding: 6px 10px;
+  }
+
+  /* Mobile: GitHub-style grid (weeks columns, 7 rows); horizontal scroll */
+  .heatmap-grid {
+    grid-template-columns: none;
+    grid-auto-flow: column;
+    grid-auto-columns: 14px;
+    grid-template-rows: repeat(7, 14px);
+    width: 100%;
+    overflow-x: auto;
+    padding-bottom: 6px;
+    scrollbar-width: thin;
+  }
+
+  .heatmap-cell {
+    width: 14px;
+    height: 14px;
+    aspect-ratio: auto;
+  }
 }
 
 .topbar-btn {

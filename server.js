@@ -33,7 +33,37 @@ const DEFAULT_PREVIEW_FPS = 2;
 const DEFAULT_PREVIEW_MAX_FRAMES = 24;
 
 app.use(express.json({ limit: "1mb" }));
-app.use(express.static(path.join(__dirname, "public")));
+
+const PUBLIC_DIR = path.join(__dirname, "public");
+
+// Default entry point: /browse
+app.get("/", (req, res) => {
+  res.redirect("/browse");
+});
+
+// SPA routes
+app.get(["/browse", "/review"], (req, res) => {
+  // iOS Safari can be aggressive about caching HTML; keep this fresh during dev.
+  res.setHeader("Cache-Control", "no-store");
+  res.sendFile(path.join(PUBLIC_DIR, "index.html"));
+});
+
+app.use(
+  express.static(PUBLIC_DIR, {
+    etag: false,
+    lastModified: false,
+    setHeaders: (res, filePath) => {
+      const lower = String(filePath).toLowerCase();
+      if (
+        lower.endsWith(".html") ||
+        lower.endsWith(".js") ||
+        lower.endsWith(".css")
+      ) {
+        res.setHeader("Cache-Control", "no-store");
+      }
+    },
+  })
+);
 
 function normalizeRelPath(relPath) {
   return relPath.split(path.sep).join("/");
