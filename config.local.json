@@ -1,0 +1,5 @@
+{
+  "mediaRoot": "/data/trailcam",
+  "previewFps": 2,
+  "previewMaxFrames": 24
+}
