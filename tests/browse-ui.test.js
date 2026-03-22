@@ -17,6 +17,8 @@ async function main() {
   const root = path.join(__dirname, "..");
   const html = fs.readFileSync(path.join(root, "public", "index.html"), "utf8");
   const script = fs.readFileSync(path.join(root, "public", "app.js"), "utf8");
+  const styles = fs.readFileSync(path.join(root, "public", "styles.css"), "utf8");
+  const routeCss = fs.readFileSync(path.join(root, "public", "route.css"), "utf8");
 
   const dom = new JSDOM(html, {
     url: "http://localhost/browse",
@@ -26,6 +28,9 @@ async function main() {
 
   const { window } = dom;
   const mediaProto = window.HTMLMediaElement.prototype;
+  const styleTag = window.document.createElement("style");
+  styleTag.textContent = `${styles}\n${routeCss}`;
+  window.document.head.appendChild(styleTag);
 
   window.matchMedia = (query) => ({
     matches: query.includes("min-width: 900px"),
@@ -63,6 +68,17 @@ async function main() {
   const libraryItems = [
     queueItems[0],
     {
+      path: "2026-01-21/earlier.jpg",
+      name: "earlier.jpg",
+      folder: "2026-01-21",
+      type: "image",
+      status: "unreviewed",
+      capturedAtMs: Date.parse("2026-01-21T10:02:00Z"),
+      mtimeMs: Date.parse("2026-01-21T10:02:00Z"),
+      sizeBytes: 150,
+      caption: "",
+    },
+    {
       path: "2026-01-21/newer.jpg",
       name: "newer.jpg",
       folder: "2026-01-21",
@@ -94,20 +110,28 @@ async function main() {
   const fileName = window.document.getElementById("fileName").textContent;
   const libraryMeta = window.document.getElementById("libraryMeta").textContent;
   const heatmapMeta = window.document.getElementById("heatmapMeta").textContent;
+  const viewerDisplay = window.getComputedStyle(
+    window.document.getElementById("viewer")
+  ).display;
 
   assert.equal(
     fileName,
     "2026-01-21/newer.jpg",
-    "browse viewer should follow the browse day selection"
+    "browse viewer should default to the newest item on the selected day"
   );
-  assert.match(libraryMeta, /Showing 1 of 1/);
+  assert.equal(
+    viewerDisplay,
+    "flex",
+    "browse route should keep the viewer visible"
+  );
+  assert.match(libraryMeta, /Showing 2 of 2/);
   assert.match(heatmapMeta, /2026-01-21/);
 
-  console.log("ok - browse route viewer stays in sync with browse selection");
+  console.log("ok - browse route shows media for the selected day");
 }
 
 main().catch((err) => {
-  console.error("not ok - browse route viewer stays in sync with browse selection");
+  console.error("not ok - browse route shows media for the selected day");
   console.error(err);
   process.exit(1);
 });

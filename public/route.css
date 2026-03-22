@@ -1,11 +1,18 @@
 /* Route-specific layout tweaks (v1 / issue 1.1) */
 
-body.route-browse #viewer,
-body.route-browse .file-info,
 body.route-browse section.caption,
 body.route-browse section.controls,
 body.route-browse section.secondary {
   display: none;
+}
+
+body.route-browse #viewer {
+  display: flex;
+  flex: 0 0 clamp(280px, 48vh, 620px);
+}
+
+body.route-browse .file-info {
+  display: block;
 }
 
 body.route-browse .browse-panel {
@@ -21,9 +28,10 @@ body.route-browse .library-resizer {
 }
 
 body.route-browse #libraryPanel {
-  flex: 1;
+  flex: 1 1 auto;
   width: 100%;
   max-width: none;
+  min-height: 0;
 }
 
 /* In Browse, the library is the page content; never hide it. */

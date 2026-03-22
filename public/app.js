@@ -465,7 +465,7 @@ function syncBrowseSelection(preferredPath = "") {
       (candidatePath) =>
         candidatePath &&
         candidates.some((item) => item.path === candidatePath)
-    ) || candidates[0].path;
+    ) || candidates[candidates.length - 1].path;
 
   const libraryIndex = findLibraryIndexByPath(desiredPath);
   if (libraryIndex < 0) {
