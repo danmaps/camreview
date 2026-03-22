@@ -117,21 +117,42 @@ async function main() {
   assert.equal(
     fileName,
     "2026-01-21/newer.jpg",
-    "browse viewer should default to the newest item on the selected day"
+    "browse viewer should default to the newest item in the full library"
   );
   assert.equal(
     viewerDisplay,
     "flex",
     "browse route should keep the viewer visible"
   );
-  assert.match(libraryMeta, /Showing 2 of 2/);
-  assert.match(heatmapMeta, /2026-01-21/);
+  assert.match(libraryMeta, /Showing 3 of 3/);
+  assert.equal(heatmapMeta, "All media · 3 captures");
 
-  console.log("ok - browse route shows media for the selected day");
+  window.eval(`
+    browseDayKey = "2026-01-18";
+    browseHour = null;
+    syncBrowseSelection();
+    renderHeatmap();
+    renderLibrary();
+    render();
+  `);
+
+  const fileNameAfterMismatch = window.document.getElementById("fileName").textContent;
+  const libraryMetaAfterMismatch = window.document.getElementById("libraryMeta").textContent;
+  const heatmapMetaAfterMismatch = window.document.getElementById("heatmapMeta").textContent;
+
+  assert.equal(
+    fileNameAfterMismatch,
+    "2026-01-21/newer.jpg",
+    "browse viewer should stay on visible media when the day selection is stale"
+  );
+  assert.match(libraryMetaAfterMismatch, /Showing 3 of 3/);
+  assert.equal(heatmapMetaAfterMismatch, "All media · 3 captures");
+
+  console.log("ok - browse route defaults to all media and ignores stale day filters");
 }
 
 main().catch((err) => {
-  console.error("not ok - browse route shows media for the selected day");
+  console.error("not ok - browse route defaults to all media and ignores stale day filters");
   console.error(err);
   process.exit(1);
 });

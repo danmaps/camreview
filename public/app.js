@@ -427,18 +427,14 @@ function applyBrowseFilters(items) {
   return out;
 }
 
-function getLatestBrowseDayKey() {
-  const latest = [...state.library]
-    .filter((item) => Number.isFinite(item.capturedAtMs ?? item.mtimeMs))
-    .sort(
-      (a, b) => (a.capturedAtMs ?? a.mtimeMs) - (b.capturedAtMs ?? b.mtimeMs)
-    )
-    .at(-1);
-  if (!latest) {
-    return "";
+function hasBrowseDay(items = state.library, dayKey = browseDayKey) {
+  if (!dayKey) {
+    return false;
   }
-  const ms = latest.capturedAtMs ?? latest.mtimeMs;
-  return formatDayKey(ms);
+  return items.some((item) => {
+    const ms = item.capturedAtMs ?? item.mtimeMs;
+    return Number.isFinite(ms) && formatDayKey(ms) === dayKey;
+  });
 }
 
 function syncBrowseSelection(preferredPath = "") {
@@ -446,22 +442,20 @@ function syncBrowseSelection(preferredPath = "") {
     return;
   }
 
-  let candidates = applyBrowseFilters(state.library);
-  if (candidates.length === 0 && state.library.length > 0) {
-    const fallbackDayKey = getLatestBrowseDayKey();
-    if (fallbackDayKey && fallbackDayKey !== browseDayKey) {
-      browseDayKey = fallbackDayKey;
-      candidates = applyBrowseFilters(state.library);
-    }
+  if (!hasBrowseDay()) {
+    browseDayKey = "";
+    browseHour = null;
   }
 
+  let candidates = applyBrowseFilters(state.library);
   if (candidates.length === 0) {
     return;
   }
 
   const current = currentPath();
+  const libraryCurrent = state.viewMode === "library" ? current : "";
   const desiredPath =
-    [preferredPath, current].find(
+    [preferredPath, libraryCurrent].find(
       (candidatePath) =>
         candidatePath &&
         candidates.some((item) => item.path === candidatePath)
@@ -1102,10 +1096,9 @@ function renderHeatmap() {
   elements.heatmapGrid.replaceChildren(fragment);
 
   // Render hour bar for selected day (desktop + mobile)
-  const selected = browseDayKey || dayKeys[dayKeys.length - 1];
-  if (!browseDayKey) {
-    browseDayKey = selected;
-  }
+  const selected = dayMap.has(browseDayKey)
+    ? browseDayKey
+    : allDays[allDays.length - 1];
   const hours = dayMap.get(selected)?.hours || Array(24).fill(0);
   const hourMax = Math.max(...hours, 1);
   const hourFrag = document.createDocumentFragment();
@@ -1137,8 +1130,12 @@ function renderHeatmap() {
   elements.hourBar.replaceChildren(hourFrag);
 
   if (elements.heatmapMeta) {
-    const shownTotal = (dayMap.get(selected)?.total || 0);
-    elements.heatmapMeta.textContent = `${selected} · ${shownTotal} captures`;
+    if (browseDayKey && dayMap.has(browseDayKey)) {
+      const shownTotal = dayMap.get(browseDayKey)?.total || 0;
+      elements.heatmapMeta.textContent = `${browseDayKey} · ${shownTotal} captures`;
+    } else {
+      elements.heatmapMeta.textContent = `All media · ${state.library.length} captures`;
+    }
   }
 }
 
@@ -1499,12 +1496,6 @@ function applyRoute(route) {
     if (elements.browsePanel) {
       elements.browsePanel.setAttribute("aria-hidden", "false");
     }
-
-    // Make sure you're not staring at an empty panel: default to latest day.
-    if (!browseDayKey && state.library.length > 0) {
-      browseDayKey = getLatestBrowseDayKey();
-    }
-
     syncBrowseSelection();
     renderHeatmap();
     renderLibrary();
