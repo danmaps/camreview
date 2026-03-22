@@ -427,6 +427,55 @@ function applyBrowseFilters(items) {
   return out;
 }
 
+function getLatestBrowseDayKey() {
+  const latest = [...state.library]
+    .filter((item) => Number.isFinite(item.capturedAtMs ?? item.mtimeMs))
+    .sort(
+      (a, b) => (a.capturedAtMs ?? a.mtimeMs) - (b.capturedAtMs ?? b.mtimeMs)
+    )
+    .at(-1);
+  if (!latest) {
+    return "";
+  }
+  const ms = latest.capturedAtMs ?? latest.mtimeMs;
+  return formatDayKey(ms);
+}
+
+function syncBrowseSelection(preferredPath = "") {
+  if (currentRoute !== "browse") {
+    return;
+  }
+
+  let candidates = applyBrowseFilters(state.library);
+  if (candidates.length === 0 && state.library.length > 0) {
+    const fallbackDayKey = getLatestBrowseDayKey();
+    if (fallbackDayKey && fallbackDayKey !== browseDayKey) {
+      browseDayKey = fallbackDayKey;
+      candidates = applyBrowseFilters(state.library);
+    }
+  }
+
+  if (candidates.length === 0) {
+    return;
+  }
+
+  const current = currentPath();
+  const desiredPath =
+    [preferredPath, current].find(
+      (candidatePath) =>
+        candidatePath &&
+        candidates.some((item) => item.path === candidatePath)
+    ) || candidates[0].path;
+
+  const libraryIndex = findLibraryIndexByPath(desiredPath);
+  if (libraryIndex < 0) {
+    return;
+  }
+
+  state.viewMode = "library";
+  state.libraryIndex = libraryIndex;
+}
+
 function renderLibrary() {
   if (!elements.libraryBody) {
     return;
@@ -1016,8 +1065,10 @@ function renderHeatmap() {
         btn.addEventListener("click", () => {
           browseDayKey = dayKey;
           browseHour = null;
+          syncBrowseSelection();
           renderHeatmap();
           renderLibrary();
+          render();
         });
       } else {
         btn.disabled = true;
@@ -1039,8 +1090,10 @@ function renderHeatmap() {
         // Desktop spec: clicking selects the whole day.
         browseDayKey = dayKey;
         browseHour = null;
+        syncBrowseSelection();
         renderHeatmap();
         renderLibrary();
+        render();
       });
       fragment.appendChild(btn);
     });
@@ -1174,6 +1227,9 @@ async function fetchItems(selectPath) {
     }
   }
   setStatus("");
+  if (currentRoute === "browse") {
+    syncBrowseSelection(activePath);
+  }
   renderLibrary();
   renderHeatmap();
   render();
@@ -1446,16 +1502,10 @@ function applyRoute(route) {
 
     // Make sure you're not staring at an empty panel: default to latest day.
     if (!browseDayKey && state.library.length > 0) {
-      const latest = [...state.library]
-        .filter((item) => Number.isFinite(item.capturedAtMs ?? item.mtimeMs))
-        .sort((a, b) => (a.capturedAtMs ?? a.mtimeMs) - (b.capturedAtMs ?? b.mtimeMs))
-        .at(-1);
-      if (latest) {
-        const ms = latest.capturedAtMs ?? latest.mtimeMs;
-        browseDayKey = formatDayKey(ms);
-      }
+      browseDayKey = getLatestBrowseDayKey();
     }
 
+    syncBrowseSelection();
     renderHeatmap();
     renderLibrary();
   } else {
