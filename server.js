@@ -107,6 +107,27 @@ function getContentType(ext) {
   return "image/jpeg";
 }
 
+function getCapturedAtMs(stat) {
+  const birthtimeMs = Number(stat.birthtimeMs);
+  const mtimeMs = Number(stat.mtimeMs);
+  const hasBirthtime = Number.isFinite(birthtimeMs) && birthtimeMs > 0;
+  const hasMtime = Number.isFinite(mtimeMs) && mtimeMs > 0;
+
+  if (hasBirthtime && hasMtime) {
+    // Copied files on Linux often get a fresh birthtime while retaining the
+    // original modified time. Prefer the earlier timestamp for stable browse
+    // grouping across Windows and Docker-mounted media.
+    return Math.min(birthtimeMs, mtimeMs);
+  }
+  if (hasBirthtime) {
+    return birthtimeMs;
+  }
+  if (hasMtime) {
+    return mtimeMs;
+  }
+  return Date.now();
+}
+
 function getPreviewSettings() {
   const fps = Number(appConfig.previewFps);
   const maxFrames = Number(appConfig.previewMaxFrames);
@@ -566,17 +587,12 @@ async function walkDir(dirPath, items) {
       }
       const relPath = normalizeRelPath(rel);
       const parsed = path.posix.parse(relPath);
-      const birthtimeMs = Number(stat.birthtimeMs);
-      const capturedAtMs =
-        Number.isFinite(birthtimeMs) && birthtimeMs > 0
-          ? birthtimeMs
-          : stat.mtimeMs;
       items.push({
         path: relPath,
         name: parsed.base,
         folder: parsed.dir || ".",
         mtimeMs: stat.mtimeMs,
-        capturedAtMs,
+        capturedAtMs: getCapturedAtMs(stat),
         sizeBytes: stat.size,
         type: getMediaType(ext),
       });
@@ -1671,4 +1687,4 @@ if (require.main === module) {
   start();
 }
 
-module.exports = { app, initialize };
+module.exports = { app, initialize, getCapturedAtMs };
