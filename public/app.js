@@ -414,7 +414,7 @@ function applyBrowseFilters(items) {
     return items;
   }
   let out = items;
-  if (browseDayKey) {
+  if (browseDayFilterEnabled && browseDayKey) {
     out = out.filter((item) => {
       const ms = item.capturedAtMs ?? item.mtimeMs;
       if (!Number.isFinite(ms)) {
@@ -428,7 +428,7 @@ function applyBrowseFilters(items) {
 }
 
 function hasBrowseDay(items = state.library, dayKey = browseDayKey) {
-  if (!dayKey) {
+  if (!browseDayFilterEnabled || !dayKey) {
     return false;
   }
   return items.some((item) => {
@@ -442,9 +442,8 @@ function syncBrowseSelection(preferredPath = "") {
     return;
   }
 
-  if (!hasBrowseDay()) {
-    browseDayKey = "";
-    browseHour = null;
+  if (browseDayFilterEnabled && !hasBrowseDay()) {
+    clearBrowseDayFilter();
   }
 
   let candidates = applyBrowseFilters(state.library);
@@ -557,7 +556,20 @@ let currentRoute = "review";
 
 // Browse filters / selection
 let browseDayKey = ""; // YYYY-MM-DD
+let browseDayFilterEnabled = false;
 let browseHour = null; // 0-23
+
+function clearBrowseDayFilter() {
+  browseDayKey = "";
+  browseDayFilterEnabled = false;
+  browseHour = null;
+}
+
+function setBrowseDayFilter(dayKey) {
+  browseDayKey = dayKey || "";
+  browseDayFilterEnabled = Boolean(dayKey);
+  browseHour = null;
+}
 
 function setLibraryOpen(open) {
   if (!elements.libraryPanel) {
@@ -1055,10 +1067,16 @@ function renderHeatmap() {
       if (dayKey) {
         btn.dataset.day = dayKey;
         btn.title = `${dayKey}: ${count} captures`;
-        btn.classList.toggle("selected", dayKey === browseDayKey);
+        btn.classList.toggle(
+          "selected",
+          browseDayFilterEnabled && dayKey === browseDayKey
+        );
         btn.addEventListener("click", () => {
-          browseDayKey = dayKey;
-          browseHour = null;
+          if (browseDayFilterEnabled && browseDayKey === dayKey) {
+            clearBrowseDayFilter();
+          } else {
+            setBrowseDayFilter(dayKey);
+          }
           syncBrowseSelection();
           renderHeatmap();
           renderLibrary();
@@ -1079,11 +1097,16 @@ function renderHeatmap() {
       btn.dataset.level = String(levelForCount(count));
       btn.dataset.day = dayKey;
       btn.title = `${dayKey}: ${count} captures`;
-      btn.classList.toggle("selected", dayKey === browseDayKey);
+      btn.classList.toggle(
+        "selected",
+        browseDayFilterEnabled && dayKey === browseDayKey
+      );
       btn.addEventListener("click", () => {
-        // Desktop spec: clicking selects the whole day.
-        browseDayKey = dayKey;
-        browseHour = null;
+        if (browseDayFilterEnabled && browseDayKey === dayKey) {
+          clearBrowseDayFilter();
+        } else {
+          setBrowseDayFilter(dayKey);
+        }
         syncBrowseSelection();
         renderHeatmap();
         renderLibrary();
@@ -1096,7 +1119,7 @@ function renderHeatmap() {
   elements.heatmapGrid.replaceChildren(fragment);
 
   // Render hour bar for selected day (desktop + mobile)
-  const selected = dayMap.has(browseDayKey)
+  const selected = browseDayFilterEnabled && dayMap.has(browseDayKey)
     ? browseDayKey
     : allDays[allDays.length - 1];
   const hours = dayMap.get(selected)?.hours || Array(24).fill(0);
@@ -1130,7 +1153,7 @@ function renderHeatmap() {
   elements.hourBar.replaceChildren(hourFrag);
 
   if (elements.heatmapMeta) {
-    if (browseDayKey && dayMap.has(browseDayKey)) {
+    if (browseDayFilterEnabled && browseDayKey && dayMap.has(browseDayKey)) {
       const shownTotal = dayMap.get(browseDayKey)?.total || 0;
       elements.heatmapMeta.textContent = `${browseDayKey} · ${shownTotal} captures`;
     } else {
@@ -1488,6 +1511,7 @@ function applyRoute(route) {
   closeMenu();
 
   if (route === "browse") {
+    clearBrowseDayFilter();
     // Browse is library-first; keep it open.
     setLibraryOpen(true);
     if (elements.libraryToggle) {

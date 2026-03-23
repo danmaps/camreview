@@ -148,6 +148,36 @@ async function main() {
   assert.match(libraryMetaAfterMismatch, /Showing 3 of 3/);
   assert.equal(heatmapMetaAfterMismatch, "All media · 3 captures");
 
+  const dayButton = window.document.querySelector('[data-day="2026-01-19"]');
+  assert.ok(dayButton, "expected a heatmap button for 2026-01-19");
+  dayButton.click();
+
+  const fileNameAfterDaySelect = window.document.getElementById("fileName").textContent;
+  const libraryMetaAfterDaySelect = window.document.getElementById("libraryMeta").textContent;
+  const heatmapMetaAfterDaySelect = window.document.getElementById("heatmapMeta").textContent;
+
+  assert.equal(
+    fileNameAfterDaySelect,
+    "2026-01-19/older.jpg",
+    "selecting a day should scope browse to that day's media"
+  );
+  assert.match(libraryMetaAfterDaySelect, /Showing 1 of 1/);
+  assert.equal(heatmapMetaAfterDaySelect, "2026-01-19 · 1 captures");
+
+  dayButton.click();
+
+  const fileNameAfterDayClear = window.document.getElementById("fileName").textContent;
+  const libraryMetaAfterDayClear = window.document.getElementById("libraryMeta").textContent;
+  const heatmapMetaAfterDayClear = window.document.getElementById("heatmapMeta").textContent;
+
+  assert.equal(
+    fileNameAfterDayClear,
+    "2026-01-19/older.jpg",
+    "clearing the day filter should restore the full library without dropping the current selection"
+  );
+  assert.match(libraryMetaAfterDayClear, /Showing 3 of 3/);
+  assert.equal(heatmapMetaAfterDayClear, "All media · 3 captures");
+
   console.log("ok - browse route defaults to all media and ignores stale day filters");
 }
 
