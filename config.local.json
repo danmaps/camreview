@@ -1,5 +1,5 @@
 {
-  "mediaRoot": "/data/trailcam",
+  "mediaRoot": "/mnt/seagate-expansion-drive/101MEDIA",
   "previewFps": 2,
   "previewMaxFrames": 24
 }

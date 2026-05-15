@@ -3,14 +3,14 @@ services:
   camreview:
     build: .
     container_name: camreview
+    env_file:
+      - .env
     ports:
-      - "100.87.16.33:3510:3510"
+      - "100.87.16.33:3510:3000"
     restart: unless-stopped
     environment:
-      - PORT=3510
-      # Optional OpenRouter keys
-      # - OPENROUTER_API_KEY=...
-      # - OPENROUTER_MODEL=...
+      - PORT=3000
+      - OPENROUTER_MODEL=${OPENROUTER_MODEL:-openai/gpt-4o-mini}
     volumes:
       - ./config.local.json:/app/config.local.json:ro
-      - /mnt/usb/trailcam:/data/trailcam:rw
+      - /mnt/usb/101media:/data/trailcam:rw
